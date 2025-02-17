@@ -7,6 +7,7 @@ from xml.etree import ElementTree
 import re
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
+import time
 
 # 設定檔案路徑
 DATA_DIR = "datasets"
@@ -70,67 +71,69 @@ def fetch_family_mart_data():
         with open(FAMILY_MART_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
-# 確保數據存在
-if not os.path.exists(SEVEN_ELEVEN_FILE):
+# 設定地理編碼器，增加 timeout 避免請求過久
+geolocator = Nominatim(user_agent="geoapiExercises", timeout=10)
+
+def find_nearest_store(address, user_lat, user_lon):
+    # 重新下載最新的 JSON
     fetch_seven_eleven_data()
-if not os.path.exists(FAMILY_MART_FILE):
     fetch_family_mart_data()
 
-# 載入數據
-with open(SEVEN_ELEVEN_FILE, 'r', encoding='utf-8') as f:
-    seven_eleven_data = json.load(f)
-with open(FAMILY_MART_FILE, 'r', encoding='utf-8') as f:
-    family_mart_data = json.load(f)
+    # 讀取最新的 JSON
+    with open(SEVEN_ELEVEN_FILE, 'r', encoding='utf-8') as f:
+        seven_eleven_data = json.load(f)
+    with open(FAMILY_MART_FILE, 'r', encoding='utf-8') as f:
+        family_mart_data = json.load(f)
 
-# 轉換為 DataFrame
-seven_df = pd.DataFrame(seven_eleven_data)
-family_df = pd.DataFrame(family_mart_data)
+    # 轉換為 DataFrame
+    seven_df = pd.DataFrame(seven_eleven_data)
+    family_df = pd.DataFrame(family_mart_data)
 
-# 設定地理編碼器
-geolocator = Nominatim(user_agent="geoapiExercises")
-
-def find_nearest_store(address, user_lat=None, user_lon=None):
+    # 解析地址為 GPS 座標
     if address:
-        location = geolocator.geocode(address)
-        if not location:
-            return "地址無法解析，請重新輸入"
-        user_coords = (location.latitude, location.longitude)
+        try:
+            location = geolocator.geocode(address, timeout=10)
+            if not location:
+                return "地址無法解析，請重新輸入"
+            user_coords = (location.latitude, location.longitude)
+        except Exception as e:
+            return f"地理編碼錯誤: {e}"
     elif user_lat and user_lon:
         user_coords = (user_lat, user_lon)
     else:
         return "請輸入地址或提供 GPS 座標"
 
     # 計算距離
-    seven_df['distance'] = seven_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
-    family_df['distance'] = family_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
+    seven_df["distance"] = seven_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
+    family_df["distance"] = family_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
 
     # 找最近門市
-    nearest_seven = seven_df.nsmallest(3, 'distance')
-    nearest_family = family_df.nsmallest(3, 'distance')
+    nearest_seven = seven_df.nsmallest(3, "distance")
+    nearest_family = family_df.nsmallest(3, "distance")
 
     output = []
     for _, row in nearest_seven.iterrows():
         output.append({
-            "門市": "7-11 " + row.get('store_name', '未知'),
+            "門市": "7-11 " + row.get("store_name", "未知"),
             "距離": f"{row['distance']:.2f} 公尺",
-            "食物": row['name'],
-            "卡路里": row['kcal'],
+            "食物": row["name"],
+            "卡路里": row["kcal"],
             "價格": f"${row['price']}",
-            "圖片": row['image']
+            "圖片": row["image"]
         })
     for _, row in nearest_family.iterrows():
         output.append({
-            "門市": "全家 " + row.get('store_name', '未知'),
+            "門市": "全家 " + row.get("store_name", "未知"),
             "距離": f"{row['distance']:.2f} 公尺",
-            "食物": row.get('title', '未知'),
-            "卡路里": row.get('Calories', '未知'),
+            "食物": row.get("title", "未知"),
+            "卡路里": row.get("Calories", "未知"),
             "價格": f"${row.get('price', 'N/A')}",
-            "圖片": row.get('picture_url', '')
+            "圖片": row.get("picture_url", "")
         })
 
     return output
 
-# Gradio UI
+# Gradio UI，新增搜尋按鈕
 def display_results(address, lat, lon):
     return find_nearest_store(address, lat, lon)
 
@@ -138,11 +141,12 @@ interface = gr.Interface(
     fn=display_results,
     inputs=[
         gr.Textbox(label="輸入地址或留空以使用 GPS"),
-        gr.Number(label="GPS 緯度 (可選)", value=None),
-        gr.Number(label="GPS 經度 (可選)", value=None)
+        gr.Number(label="GPS 緯度 (可選)", value=0),
+        gr.Number(label="GPS 經度 (可選)", value=0),
+        gr.Button("搜尋")
     ],
     outputs=gr.Dataframe(headers=["門市", "距離", "食物", "卡路里", "價格", "圖片"]),
-    live=True,
+    live=False,  # 只有按「搜尋」才會執行
     title="便利商店門市與商品搜尋",
     description="輸入地址或 GPS 座標來搜尋最近的便利商店與推薦商品"
 )
