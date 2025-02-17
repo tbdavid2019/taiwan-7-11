@@ -14,56 +14,6 @@ family_mart_products_file = "family_mart_items.json"
 # 限制搜尋範圍為 3 公里
 MAX_DISTANCE = 3000  
 
-# 下載 7-11 JSON
-def download_seven_eleven_data():
-    if not os.path.exists(seven_eleven_file):
-        print("⚠️  7-11 JSON 不存在，開始下載...")
-        url = "https://www.7-11.com.tw/freshfoods/Read_Food_xml_hot.aspx"
-        response = requests.get(url)
-        if response.status_code == 200:
-            with open(seven_eleven_file, "w", encoding="utf-8") as f:
-                f.write(response.text)
-            print("✅  7-11 JSON 下載完成")
-        else:
-            print(f"❌ 下載 7-11 JSON 失敗，錯誤碼: {response.status_code}")
-
-# 下載全家商店 JSON
-def download_family_mart_stores():
-    if not os.path.exists(family_mart_stores_file):
-        print("⚠️  全家商店 JSON 不存在，開始下載...")
-        url = "https://family.map.com.tw/famiport/api/dropdownlist/Select_StoreName"
-        response = requests.post(url, json={"store": ""})
-        if response.status_code == 200:
-            with open(family_mart_stores_file, "w", encoding="utf-8") as f:
-                json.dump(response.json(), f, ensure_ascii=False, indent=4)
-            print("✅  全家商店 JSON 下載完成")
-        else:
-            print(f"❌ 下載全家商店 JSON 失敗，錯誤碼: {response.status_code}")
-
-# 下載全家商品 JSON
-def download_family_mart_products():
-    if not os.path.exists(family_mart_products_file):
-        print("⚠️  全家商品 JSON 不存在，開始下載...")
-        url = "https://famihealth.family.com.tw/Calculator"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            match = re.search(r'var categories = (\[.*?\]);', response.text, re.S)
-            if match:
-                categories_data = json.loads(match.group(1))
-                results = [
-                    {
-                        "category": cat.get("name"),
-                        "title": prod.get("name"),
-                        "picture_url": prod.get("imgurl"),
-                        "calories": prod.get("calo", 0)
-                    }
-                    for cat in categories_data for prod in cat.get("products", [])
-                ]
-                with open(family_mart_products_file, "w", encoding="utf-8") as f:
-                    json.dump(results, f, ensure_ascii=False, indent=4)
-                print("✅  全家商品 JSON 下載完成")
-
 # 讀取 JSON 檔案
 def load_json(filename):
     if os.path.exists(filename):
@@ -71,7 +21,6 @@ def load_json(filename):
             return json.load(f)
     return []
 
-# 搜尋最近的店家
 def find_nearest_store(address, lat, lon):
     print(f"🔍 收到查詢請求: address={address}, lat={lat}, lon={lon}")
 
@@ -79,86 +28,107 @@ def find_nearest_store(address, lat, lon):
         return [["❌ 請輸入地址或提供 GPS 座標", "", "", "", ""]]
 
     user_coords = (lat, lon)
-    
-    # 讀取商店 JSON
-    seven_data = load_json(seven_eleven_file)
-    family_data = load_json(family_mart_stores_file)
-    family_mart_items = load_json(family_mart_products_file)
 
-    # ----------------------------
-    # 將 7-11 資料轉成 DataFrame (依照你實際的 JSON 結構)
-    # ----------------------------
-    # 假設 seven_data 每一筆包含:
-    # {
-    #   "StoreName": "7-11 XXX店",
-    #   "latitude": 25.123,
-    #   "longitude": 121.456,
-    #   ...
-    # }
-    # 請依你實際欄位修改
-    seven_df = pd.DataFrame(seven_data)
-    if not {"latitude", "longitude"}.issubset(seven_df.columns):
-        # 如果 7-11 資料中沒有 latitude/longitude，就先跳過
-        return [["❌ 7-11 資料中找不到經緯度欄位", "", "", "", ""]]
-    
-    # ----------------------------
-    # 將全家資料轉成 DataFrame
-    # ----------------------------
-    # 假設 family_data 裡的欄位是 py_wgs84 / px_wgs84
-    # (py_wgs84 = 緯度, px_wgs84 = 經度)
-    family_df = pd.DataFrame(family_data)
-    if not {"py_wgs84", "px_wgs84"}.issubset(family_df.columns):
-        return [["❌ 全家資料中找不到 py_wgs84 / px_wgs84 欄位", "", "", "", ""]]
-    
-    # 處理經緯度欄位
-    seven_df["latitude"] = seven_df["latitude"].astype(float)
-    seven_df["longitude"] = seven_df["longitude"].astype(float)
-    family_df["latitude"] = family_df["py_wgs84"].astype(float)
-    family_df["longitude"] = family_df["px_wgs84"].astype(float)
+    # ========== 先處理 7-11 資料 ==========
+    seven_df = pd.DataFrame()
+    try:
+        seven_data = load_json(seven_eleven_file)
+        if not seven_data:
+            print("⚠️  7-11 資料是空的 (無法讀取或檔案沒有內容)")
+        else:
+            print("✅  成功讀取 7-11 資料，前五筆為：")
+            # 直接列印前五筆 raw data（list 切片）
+            print(seven_data[:5])
+            
+            # 假設 7-11 JSON 每筆資料都有這些欄位：
+            # {
+            #   "StoreName": "7-11 XXX店",
+            #   "latitude": 25.123,
+            #   "longitude": 121.456,
+            #   ...
+            # }
+            seven_df = pd.DataFrame(seven_data)
+            
+            # 若確定這些欄位名稱存在，就做經緯度轉換
+            if {"latitude", "longitude"}.issubset(seven_df.columns):
+                seven_df["latitude"] = seven_df["latitude"].astype(float)
+                seven_df["longitude"] = seven_df["longitude"].astype(float)
+                seven_df["distance_m"] = seven_df.apply(
+                    lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters,
+                    axis=1
+                )
+            else:
+                print("⚠️  7-11 資料裡沒有 'latitude' 或 'longitude' 欄位，無法計算距離。")
+                seven_df = pd.DataFrame()  # 直接清空，代表無法使用
+    except Exception as e:
+        print(f"❌  讀取或處理 7-11 資料時發生錯誤: {e}")
+        seven_df = pd.DataFrame()
 
-    # 計算距離
-    seven_df["distance_m"] = seven_df.apply(
-        lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters,
-        axis=1
-    )
-    family_df["distance_m"] = family_df.apply(
-        lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters,
-        axis=1
-    )
+    # ========== 再處理 Family 資料 ==========
+    family_df = pd.DataFrame()
+    try:
+        family_data = load_json(family_mart_stores_file)
+        if not family_data:
+            print("⚠️  全家資料是空的 (無法讀取或檔案沒有內容)")
+        else:
+            print("✅  成功讀取 Family 資料，前五筆為：")
+            print(family_data[:5])
 
-    # 過濾 3 公里範圍內的商店，並只取前 5 間
-    nearby_seven = seven_df[seven_df["distance_m"] <= MAX_DISTANCE].sort_values(by="distance_m").head(5)
-    nearby_family = family_df[family_df["distance_m"] <= MAX_DISTANCE].sort_values(by="distance_m").head(5)
+            # 假設 Family JSON 裡的欄位是 py_wgs84 / px_wgs84 (緯度 / 經度)
+            family_df = pd.DataFrame(family_data)
+            if {"py_wgs84", "px_wgs84"}.issubset(family_df.columns):
+                family_df["latitude"] = family_df["py_wgs84"].astype(float)
+                family_df["longitude"] = family_df["px_wgs84"].astype(float)
+                family_df["distance_m"] = family_df.apply(
+                    lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters,
+                    axis=1
+                )
+            else:
+                print("⚠️  全家資料裡沒有 'py_wgs84' 或 'px_wgs84' 欄位，無法計算距離。")
+                family_df = pd.DataFrame()
+    except Exception as e:
+        print(f"❌  讀取或處理 Family 資料時發生錯誤: {e}")
+        family_df = pd.DataFrame()
 
-    # 如果都沒有符合的店家
-    if len(nearby_seven) == 0 and len(nearby_family) == 0:
+    # ========== 篩選 3 公里內最近的店家 ==========
+    # 7-11
+    nearby_seven = pd.DataFrame()
+    if not seven_df.empty and "distance_m" in seven_df.columns:
+        nearby_seven = seven_df[seven_df["distance_m"] <= MAX_DISTANCE].sort_values(by="distance_m").head(5)
+
+    # 全家
+    nearby_family = pd.DataFrame()
+    if not family_df.empty and "distance_m" in family_df.columns:
+        nearby_family = family_df[family_df["distance_m"] <= MAX_DISTANCE].sort_values(by="distance_m").head(5)
+
+    if nearby_seven.empty and nearby_family.empty:
         return [["❌ 附近 3 公里內沒有便利商店", "", "", "", ""]]
 
-    # 整理成表格輸出 (DataFrame 只能回傳一個，所以可以把兩者合併)
+    # ========== 整理成表格輸出 ==========
     output = []
 
-    # 7-11
-    for _, row in nearby_seven.iterrows():
-        store_name = row.get("StoreName", "7-11 未提供店名")
-        dist = f"{row['distance_m']:.2f} m"
-        # 這裡示範把「商品」先寫成 "7-11 商品" 或自行處理
-        output.append([
-            store_name,
-            dist,
-            "7-11 商品(示意)",
-            ""
-        ])
-    
-    # 全家
-    for _, row in nearby_family.iterrows():
-        store_name = row.get("Name", "全家 未提供店名")
-        dist = f"{row['distance_m']:.2f} m"
-        output.append([
-            store_name,
-            dist,
-            "全家 商品(示意)",
-            ""
-        ])
+    # 7-11 結果
+    if not nearby_seven.empty:
+        for _, row in nearby_seven.iterrows():
+            store_name = row.get("StoreName", "7-11 未提供店名")
+            dist = f"{row['distance_m']:.2f} m"
+            output.append([
+                store_name,
+                dist,
+                "7-11 商品(示意)",
+                "5"  # 這裡只是示範
+            ])
+    # 全家 結果
+    if not nearby_family.empty:
+        for _, row in nearby_family.iterrows():
+            store_name = row.get("Name", "全家 未提供店名")
+            dist = f"{row['distance_m']:.2f} m"
+            output.append([
+                store_name,
+                dist,
+                "全家 商品(示意)",
+                "5"  # 這裡只是示範
+            ])
 
     return output
 
@@ -182,7 +152,6 @@ with gr.Blocks() as demo:
 
     search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
-    # 按下「使用目前位置」後，利用 JS 取得地理位置，並自動填入 lat / lon
     gps_button.click(
         None,
         None,
@@ -210,4 +179,5 @@ with gr.Blocks() as demo:
         """
     )
 
-demo.launch(share=True)
+# 在 launch 時加上 debug=True 也可以幫助觀察更多 log 資訊
+demo.launch(share=True, debug=True)
