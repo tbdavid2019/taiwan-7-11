@@ -78,7 +78,7 @@ def find_nearest_store(address, user_lat, user_lon):
 
     if user_lat == 0 or user_lon == 0:
         print("❌ GPS 座標無效，請提供有效數值")
-        return [["❌ 請輸入地址或提供 GPS 座標", "", "", ""]]
+        return [["❌ 請輸入地址或提供 GPS 座標", "", "", "", ""]]
 
     user_coords = (user_lat, user_lon)
     print(f"📍 使用 GPS 座標: {user_coords}")
@@ -90,7 +90,7 @@ def find_nearest_store(address, user_lat, user_lon):
     # **檢查 JSON 是否成功下載**
     if not os.path.exists(SEVEN_ELEVEN_FILE) or not os.path.exists(FAMILY_MART_FILE):
         print("⚠️ JSON 下載後仍然不存在，請檢查 API 是否有效")
-        return [["❌ 便利商店數據下載失敗", "", "", ""]]
+        return [["❌ 便利商店數據下載失敗", "", "", "", ""]]
 
     # **讀取 JSON 檔案**
     with open(SEVEN_ELEVEN_FILE, 'r', encoding='utf-8') as f:
@@ -106,21 +106,33 @@ def find_nearest_store(address, user_lat, user_lon):
     print(f"✅ 7-11 資料行數: {len(seven_df)}, 全家資料行數: {len(family_df)}")
 
     if seven_df.empty and family_df.empty:
-        print("⚠️  便利商店資料為空")
-        return [["❌ 便利商店數據為空", "", "", ""]]
+        print("⚠️ 便利商店資料為空")
+        return [["❌ 便利商店數據為空", "", "", "", ""]]
 
-    # 過濾無效座標
+    # ✅ **修正全家的座標**
+    family_df["latitude"] = family_df["py_wgs84"]
+    family_df["longitude"] = family_df["px_wgs84"]
+
+    # **過濾無效座標**
     family_df = family_df.dropna(subset=["latitude", "longitude"])
     family_df = family_df[(family_df["latitude"] != 0.0) & (family_df["longitude"] != 0.0)]
 
-    # 計算距離
+    print("🔍 前 5 筆處理後的全家資料:")
+    print(family_df[["store_name", "latitude", "longitude"]].head())
+
+    # **計算距離**
     try:
-        family_df["distance"] = family_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
+        family_df["distance"] = family_df.apply(
+            lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1
+        )
     except Exception as e:
         print(f"❌ 計算距離時發生錯誤: {e}")
-        return [["❌ 計算距離失敗", "", "", ""]]
+        return [["❌ 計算距離失敗", "", "", "", ""]]
 
-    # 取最近的 3 間門市
+    # **🚀 過濾 3km 內的店家**
+    family_df = family_df[family_df["distance"] <= 3000]
+
+    # **取最近的 3 間門市**
     nearest_family = family_df.nsmallest(3, "distance")
 
     output = []
@@ -128,6 +140,7 @@ def find_nearest_store(address, user_lat, user_lon):
         output.append([
             f"{row['store_type']}, {row['store_name']}",
             f"{row['distance']:.2f} 公尺",
+            f"{row['distance']:.0f} m",  # 🆕 顯示距離 (m)
             row.get("title", "未知"),
             row["quantity"]
         ])
@@ -148,7 +161,8 @@ with gr.Blocks() as interface:
         use_gps_button = gr.Button("使用目前位置")
         search_button = gr.Button("搜尋")
 
-    output_table = gr.Dataframe(headers=["門市", "距離", "食物", "數量"])
+
+    output_table = gr.Dataframe(headers=["門市", "距離", "距離 (m)", "食物", "數量"])
 
     # **使用目前位置**
     use_gps_button.click(None, [], [lat, lon], js="""
