@@ -82,12 +82,14 @@ def fetch_family_mart_products():
 get_location_js = """
 navigator.geolocation.getCurrentPosition(
     function(position) {
-        console.log("GPS 取得成功:", position.coords.latitude, position.coords.longitude);
-        navigator.clipboard.writeText(position.coords.latitude + "," + position.coords.longitude);
-        alert("GPS 座標已複製到剪貼簿！請貼上到欄位中使用。");
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        console.log("📍 GPS 取得成功:", lat, lon);
+        gradioApp().querySelector("#gps_lat").value = lat;
+        gradioApp().querySelector("#gps_lon").value = lon;
     },
     function(error) {
-        console.log("GPS 取得失敗:", error);
+        console.log("❌ GPS 取得失敗:", error);
         alert("❌ 無法獲取 GPS 位置，請確認瀏覽器已授權");
     }
 );
@@ -144,14 +146,14 @@ with gr.Blocks() as demo:
     gr.Markdown("輸入 GPS 座標來搜尋最近的便利商店與推薦商品")
 
     address = gr.Textbox(label="輸入地址或留空以使用 GPS")
-    lat = gr.Number(label="GPS 緯度 (可選)")
-    lon = gr.Number(label="GPS 經度 (可選)")
+    lat = gr.Number(label="GPS 緯度 (可選)", elem_id="gps_lat")
+    lon = gr.Number(label="GPS 經度 (可選)", elem_id="gps_lon")
 
     gps_button = gr.Button("📍 使用目前位置")
     search_button = gr.Button("🔍 搜尋")
     output_table = gr.Dataframe(headers=["門市", "距離", "距離 (m)", "食物", "數量"])
 
-    gps_button.click(None, [], [], _js=get_location_js)
+    gps_button.click(None, [], [], js=get_location_js)
     search_button.click(find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
 demo.launch()
