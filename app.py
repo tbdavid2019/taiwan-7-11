@@ -175,7 +175,22 @@ with gr.Blocks() as demo:
     search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
     # 設定 GPS 按鈕的 JavaScript
-    gps_button.click(fn=None, inputs=None, outputs=None, js=get_location_js)
 
+
+    gps_button.click(
+        None,
+        None,
+        [lat, lon],
+        js="""
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                return [position.coords.latitude, position.coords.longitude];
+            },
+            (error) => {
+                alert("無法獲取位置：" + error.message);
+            }
+        );
+        """
+    )
 
 demo.launch(share=True)
