@@ -19,9 +19,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # 下載 7-11 JSON
 def fetch_seven_eleven_data():
     base_url = "https://www.7-11.com.tw/freshfoods/Read_Food_xml_hot.aspx"
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     categories = ["1_Ricerolls", "16_sandwich", "2_Light", "3_Cuisine", "4_Snacks"]
 
     data = []
@@ -132,19 +130,21 @@ with gr.Blocks() as interface:
     output_table = gr.Dataframe(headers=["門市", "距離", "食物", "卡路里", "價格", "圖片"])
 
     # **使用目前位置 - 透過 JavaScript 取得 GPS**
-    use_gps_button.click(None, [], [], _js="""
-    () => {
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                document.querySelector('input[aria-label="GPS 緯度 (可選)"]').value = position.coords.latitude;
-                document.querySelector('input[aria-label="GPS 經度 (可選)"]').value = position.coords.longitude;
-            },
-            (error) => {
-                alert("無法取得您的 GPS 位置，請允許瀏覽器存取您的位置。");
-            }
-        );
-    }
-    """)
+    use_gps_button.click(
+        None, [], [], js="""
+        () => {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    document.querySelector('input[aria-label="GPS 緯度 (可選)"]').value = position.coords.latitude;
+                    document.querySelector('input[aria-label="GPS 經度 (可選)"]').value = position.coords.longitude;
+                },
+                (error) => {
+                    alert("無法取得您的 GPS 位置，請允許瀏覽器存取您的位置。");
+                }
+            );
+        }
+        """
+    )
 
     # **當按下搜尋按鈕時，才會執行 `find_nearest_store`**
     search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
