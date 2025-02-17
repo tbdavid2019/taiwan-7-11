@@ -120,25 +120,38 @@ def find_nearest_store(address, lat, lon):
 # 獲取 GPS 的 JavaScript (確保可用)
 get_location_js = """
 async function getLocation() {
+    if (!navigator.geolocation) {
+        alert("您的瀏覽器不支援地理位置功能");
+        return;
+    }
+
+    const options = {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+    };
+
     try {
         const position = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject);
+            navigator.geolocation.getCurrentPosition(resolve, reject, options);
         });
         
-        const lat = position.coords.latitude;
-        const lon = position.coords.longitude;
+        document.getElementById('lat').value = position.coords.latitude;
+        document.getElementById('lon').value = position.coords.longitude;
         
-        document.querySelector('#lat').value = lat;
-        document.querySelector('#lon').value = lon;
-        
-        // 自動觸發搜尋按鈕
-        document.querySelector('button:contains("搜尋")').click();
-        
-    } catch (error) {
-        alert("無法取得 GPS 位置,請確認已允許位置存取權限");
-        console.error(error);
+        // 觸發搜尋
+        const searchBtn = document.querySelector('button[id*="search"]');
+        if(searchBtn) searchBtn.click();
+    } catch (err) {
+        if(err.code === 1) {
+            alert("請允許網站存取位置權限");
+        } else {
+            alert("無法取得位置資訊: " + err.message);
+        }
+        console.error(err);
     }
 }
+getLocation();
 """
 
 # Gradio UI
@@ -165,4 +178,4 @@ with gr.Blocks() as demo:
     gps_button.click(fn=None, inputs=None, outputs=None, js=get_location_js)
 
 
-demo.launch()
+demo.launch(share=True, enable_queue=False, ssl_verify=False)
