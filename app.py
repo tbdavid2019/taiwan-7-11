@@ -35,7 +35,7 @@ def fetch_seven_eleven_data():
                         "store_name": "未知門市",
                         "name": item.findtext("name", ""),
                         "quantity": 1,
-                        "latitude": 0.0,  # 假設沒座標
+                        "latitude": 0.0,  # 7-11 沒有座標，需手動補充
                         "longitude": 0.0
                     })
             except ElementTree.ParseError:
@@ -70,7 +70,8 @@ geolocator = Nominatim(user_agent="geoapiExercises", timeout=10)
 def find_nearest_store(address, user_lat, user_lon):
     print(f"🔍 收到查詢請求: address={address}, lat={user_lat}, lon={user_lon}")
 
-    if not user_lat or not user_lon:
+    if user_lat == 0 or user_lon == 0:
+        print("❌ GPS 座標無效，請提供有效數值")
         return [["❌ 請輸入地址或提供 GPS 座標", "", "", ""]]
 
     fetch_seven_eleven_data()
@@ -130,23 +131,22 @@ with gr.Blocks() as interface:
 
     # **使用目前位置 - 透過 JavaScript 取得 GPS**
     use_gps_button.click(
-        None, [], [], js="""
+        None, [], [lat, lon], js="""
         () => {
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    let latInput = document.querySelector('input[aria-label="GPS 緯度 (可選)"]');
-                    let lonInput = document.querySelector('input[aria-label="GPS 經度 (可選)"]');
-
-                    latInput.value = position.coords.latitude;
-                    lonInput.value = position.coords.longitude;
-
-                    latInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    lonInput.dispatchEvent(new Event('input', { bubbles: true }));
-                },
-                (error) => {
-                    alert("無法取得您的 GPS 位置，請允許瀏覽器存取您的位置。");
-                }
-            );
+            return new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        let latitude = position.coords.latitude;
+                        let longitude = position.coords.longitude;
+                        console.log("📍 取得 GPS 座標:", latitude, longitude);
+                        resolve([latitude, longitude]); 
+                    },
+                    (error) => {
+                        alert("無法取得您的 GPS 位置，請允許瀏覽器存取您的位置。");
+                        reject([0, 0]);
+                    }
+                );
+            });
         }
         """
     )
