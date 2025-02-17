@@ -16,54 +16,6 @@ FAMILY_MART_FILE = os.path.join(DATA_DIR, "family_mart_products.json")
 # 確保 datasets 資料夾存在
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# 下載 7-11 JSON
-def fetch_seven_eleven_data():
-    print("📥 正在下載 7-11 最新數據...")
-    base_url = "https://www.7-11.com.tw/freshfoods/Read_Food_xml_hot.aspx"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    categories = ["1_Ricerolls", "16_sandwich", "2_Light", "3_Cuisine", "4_Snacks"]
-
-    data = []
-    for category in categories:
-        response = requests.get(base_url, headers=headers)
-        if response.status_code == 200:
-            try:
-                root = ElementTree.fromstring(response.content)
-                for item in root.findall(".//Item"):
-                    data.append({
-                        "store_type": "7-11",
-                        "store_name": "未知門市",
-                        "name": item.findtext("name", ""),
-                        "quantity": 1,
-                        "latitude": 0.0,  # 7-11 沒有座標，需手動補充
-                        "longitude": 0.0
-                    })
-            except ElementTree.ParseError:
-                print(f"⚠️  解析 7-11 分類 {category} 失敗")
-    
-    with open(SEVEN_ELEVEN_FILE, "w", encoding="utf-8") as json_file:
-        json.dump(data, json_file, ensure_ascii=False, indent=4)
-    print("✅ 7-11 數據下載完成")
-
-# 下載全家 JSON
-def fetch_family_mart_data():
-    print("📥 正在下載全家最新數據...")
-    url = 'https://family.map.com.tw/famiport/api/dropdownlist/Select_StoreName'
-    response = requests.post(url, json={"store": ""})
-
-    if response.status_code == 200:
-        data = response.json()
-        for store in data:
-            store["store_type"] = "全家"
-            store["store_name"] = store.get("name", "未知門市")
-            store["quantity"] = 1
-            store["latitude"] = store.get("lat", 0.0)
-            store["longitude"] = store.get("lng", 0.0)
-
-        with open(FAMILY_MART_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    print("✅ 全家數據下載完成")
-
 # 設定地理編碼器
 geolocator = Nominatim(user_agent="geoapiExercises", timeout=10)
 
@@ -74,24 +26,53 @@ def find_nearest_store(address, user_lat, user_lon):
         print("❌ GPS 座標無效，請提供有效數值")
         return [["❌ 請輸入地址或提供 GPS 座標", "", "", ""]]
 
-    fetch_seven_eleven_data()
-    fetch_family_mart_data()
+    user_coords = (user_lat, user_lon)
+    print(f"📍 使用 GPS 座標: {user_coords}")
 
+    # 檢查 JSON 文件是否存在
+    if not os.path.exists(SEVEN_ELEVEN_FILE) or not os.path.exists(FAMILY_MART_FILE):
+        print("⚠️ JSON 資料不存在，請重新下載")
+        return [["❌ 便利商店數據不可用", "", "", ""]]
+
+    # 讀取 JSON 檔案
     with open(SEVEN_ELEVEN_FILE, 'r', encoding='utf-8') as f:
         seven_eleven_data = json.load(f)
     with open(FAMILY_MART_FILE, 'r', encoding='utf-8') as f:
         family_mart_data = json.load(f)
 
+    # 轉換為 DataFrame
     seven_df = pd.DataFrame(seven_eleven_data)
     family_df = pd.DataFrame(family_mart_data)
 
-    user_coords = (user_lat, user_lon)
-    print(f"📍 使用 GPS 座標: {user_coords}")
+    print(f"✅ 7-11 資料行數: {len(seven_df)}, 全家資料行數: {len(family_df)}")
+
+    # 確保 DataFrame 不是空的
+    if seven_df.empty or family_df.empty:
+        print("⚠️  便利商店資料為空")
+        return [["❌ 便利商店數據為空", "", "", ""]]
+
+    # 檢查是否有 "latitude" 和 "longitude" 欄位
+    if "latitude" not in seven_df.columns or "longitude" not in seven_df.columns:
+        print("⚠️  7-11 資料缺少座標欄位")
+        return [["❌ 7-11 資料缺少座標", "", "", ""]]
+    
+    if "latitude" not in family_df.columns or "longitude" not in family_df.columns:
+        print("⚠️  全家資料缺少座標欄位")
+        return [["❌ 全家資料缺少座標", "", "", ""]]
+
+    # 移除沒有座標的行
+    seven_df = seven_df.dropna(subset=["latitude", "longitude"])
+    family_df = family_df.dropna(subset=["latitude", "longitude"])
 
     # 計算距離
-    seven_df["distance"] = seven_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
-    family_df["distance"] = family_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
+    try:
+        seven_df["distance"] = seven_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
+        family_df["distance"] = family_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
+    except Exception as e:
+        print(f"❌ 計算距離時發生錯誤: {e}")
+        return [["❌ 計算距離失敗", "", "", ""]]
 
+    # 取最近的 3 間門市
     nearest_seven = seven_df.nsmallest(3, "distance")
     nearest_family = family_df.nsmallest(3, "distance")
 
