@@ -182,23 +182,25 @@ with gr.Blocks() as demo:
         None,
         [lat, lon],
         js="""
-        new Promise((resolve, reject) => {
-            if (!navigator.geolocation) {
-                alert("您的瀏覽器不支援地理位置功能");
-                resolve([0, 0]); // 失敗時回傳 [0,0] 避免錯誤
-                return;
-            }
-
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    resolve([position.coords.latitude, position.coords.longitude]);
-                },
-                (error) => {
-                    alert("無法獲取位置：" + error.message);
-                    resolve([0, 0]); // 失敗時回傳 [0,0]
+        () => {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) {
+                    alert("您的瀏覽器不支援地理位置功能");
+                    resolve([0, 0]); // 回傳 [0,0] 避免錯誤
+                    return;
                 }
-            );
-        });
+                
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        resolve([position.coords.latitude, position.coords.longitude]);
+                    },
+                    (error) => {
+                        alert("無法獲取位置：" + error.message);
+                        resolve([0, 0]); // GPS 失敗時回傳 [0,0]
+                    }
+                );
+            });
+        }
         """
     )
 
