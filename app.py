@@ -153,6 +153,7 @@ with gr.Blocks() as demo:
     search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
     # 設定 GPS 按鈕的 JavaScript
-    gps_button.click(None, [], [], _js="getLocation()")
+    gps_button.click(None, [], [], js=get_location_js)
+
 
 demo.launch()
