@@ -6,14 +6,32 @@ import pandas as pd
 from geopy.distance import geodesic
 
 # ⏳ 下載 7-11 JSON
+
 seven_eleven_url = "https://www.7-11.com.tw/freshfoods/Read_Food_xml_hot.aspx"
 seven_eleven_file = "seven_eleven_products.json"
 
+
+# 先檢查檔案是否存在，沒有的話下載
 if not os.path.exists(seven_eleven_file):
-    response = requests.get(seven_eleven_url)
+    print("⚠️  7-11 JSON 檔案不存在，正在下載...")
+    # 這裡是 7-11 資料的 API (如果有 API，請填入正確的 URL)
+    api_url = "https://example.com/api/7-11-products"  # 這裡要替換為正確的 URL
+    response = requests.get(api_url)
+
     if response.status_code == 200:
         with open(seven_eleven_file, "w", encoding="utf-8") as f:
-            json.dump(response.json(), f, ensure_ascii=False, indent=4)
+            f.write(response.text)
+        print("✅  7-11 JSON 下載完成！")
+    else:
+        print(f"❌ 下載失敗，狀態碼: {response.status_code}")
+
+# 讀取 JSON 檔案
+try:
+    with open(seven_eleven_file, "r", encoding="utf-8") as f:
+        seven_eleven_data = json.load(f)
+    print("📂  7-11 JSON 成功讀取！")
+except Exception as e:
+    print(f"❌  讀取 JSON 失敗: {e}")
 
 # ⏳ 下載全家 JSON
 family_mart_url = "https://family.map.com.tw/famiport/api/dropdownlist/Select_StoreName"
