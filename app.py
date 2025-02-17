@@ -178,4 +178,4 @@ with gr.Blocks() as demo:
     gps_button.click(fn=None, inputs=None, outputs=None, js=get_location_js)
 
 
-demo.launch(share=True, enable_queue=False, ssl_verify=False)
+demo.launch(share=True)
