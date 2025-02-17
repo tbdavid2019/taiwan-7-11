@@ -7,9 +7,8 @@ from xml.etree import ElementTree
 import re
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
-import time
 
-# 設定檔案路徑
+# 設定資料夾
 DATA_DIR = "datasets"
 SEVEN_ELEVEN_FILE = os.path.join(DATA_DIR, "seven_eleven_products.json")
 FAMILY_MART_FILE = os.path.join(DATA_DIR, "family_mart_products.json")
@@ -71,11 +70,11 @@ def fetch_family_mart_data():
         with open(FAMILY_MART_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
-# 設定地理編碼器，增加 timeout 避免請求過久
+# 設定地理編碼器
 geolocator = Nominatim(user_agent="geoapiExercises", timeout=10)
 
 def find_nearest_store(address, user_lat, user_lon):
-    # 重新下載最新的 JSON
+    # 重新下載最新 JSON
     fetch_seven_eleven_data()
     fetch_family_mart_data()
 
@@ -133,22 +132,19 @@ def find_nearest_store(address, user_lat, user_lon):
 
     return output
 
-# Gradio UI，新增搜尋按鈕
-def display_results(address, lat, lon):
-    return find_nearest_store(address, lat, lon)
+# **Gradio UI**
+with gr.Blocks() as interface:
+    gr.Markdown("## 便利商店門市與商品搜尋")
+    gr.Markdown("輸入地址或 GPS 座標來搜尋最近的便利商店與推薦商品")
 
-interface = gr.Interface(
-    fn=display_results,
-    inputs=[
-        gr.Textbox(label="輸入地址或留空以使用 GPS"),
-        gr.Number(label="GPS 緯度 (可選)", value=0),
-        gr.Number(label="GPS 經度 (可選)", value=0),
-        gr.Button("搜尋")
-    ],
-    outputs=gr.Dataframe(headers=["門市", "距離", "食物", "卡路里", "價格", "圖片"]),
-    live=False,  # 只有按「搜尋」才會執行
-    title="便利商店門市與商品搜尋",
-    description="輸入地址或 GPS 座標來搜尋最近的便利商店與推薦商品"
-)
+    address = gr.Textbox(label="輸入地址或留空以使用 GPS")
+    lat = gr.Number(label="GPS 緯度 (可選)", value=0)
+    lon = gr.Number(label="GPS 經度 (可選)", value=0)
+
+    search_button = gr.Button("搜尋")
+    output_table = gr.Dataframe(headers=["門市", "距離", "食物", "卡路里", "價格", "圖片"])
+
+    # **當按下搜尋按鈕時，才會執行 `display_results`**
+    search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
 interface.launch()
