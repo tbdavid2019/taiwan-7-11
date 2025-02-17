@@ -81,18 +81,20 @@ def fetch_family_mart_products():
 # **📍 JavaScript 取得 GPS**
 get_location_js = """
 navigator.geolocation.getCurrentPosition(
-    function(position) {
+    (position) => {
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
         console.log("📍 GPS 取得成功:", lat, lon);
-        gradioApp().querySelector("#gps_lat").value = lat;
-        gradioApp().querySelector("#gps_lon").value = lon;
+
+        // 更新 Gradio UI
+        document.querySelector('input[aria-label="GPS 緯度 (可選)"]').value = lat;
+        document.querySelector('input[aria-label="GPS 經度 (可選)"]').value = lon;
     },
-    function(error) {
+    (error) => {
         console.log("❌ GPS 取得失敗:", error);
         alert("❌ 無法獲取 GPS 位置，請確認瀏覽器已授權");
     }
-);
+)
 """
 
 # **🔍 查找最近門市**
@@ -150,6 +152,8 @@ with gr.Blocks() as demo:
     lon = gr.Number(label="GPS 經度 (可選)", elem_id="gps_lon")
 
     gps_button = gr.Button("📍 使用目前位置")
+    gps_button.click(None, [], [], js=get_location_js)
+
     search_button = gr.Button("🔍 搜尋")
     output_table = gr.Dataframe(headers=["門市", "距離", "距離 (m)", "食物", "數量"])
 
