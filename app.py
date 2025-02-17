@@ -119,16 +119,25 @@ def find_nearest_store(address, lat, lon):
 
 # 獲取 GPS 的 JavaScript (確保可用)
 get_location_js = """
-function getLocation() {
-    navigator.geolocation.getCurrentPosition(
-        function (position) {
-            document.getElementById('lat').value = position.coords.latitude;
-            document.getElementById('lon').value = position.coords.longitude;
-        },
-        function (error) {
-            alert("請允許瀏覽器存取 GPS 位置");
-        }
-    );
+async function getLocation() {
+    try {
+        const position = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject);
+        });
+        
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        
+        document.querySelector('#lat').value = lat;
+        document.querySelector('#lon').value = lon;
+        
+        // 自動觸發搜尋按鈕
+        document.querySelector('button:contains("搜尋")').click();
+        
+    } catch (error) {
+        alert("無法取得 GPS 位置,請確認已允許位置存取權限");
+        console.error(error);
+    }
 }
 """
 
@@ -153,7 +162,7 @@ with gr.Blocks() as demo:
     search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
     # 設定 GPS 按鈕的 JavaScript
-    gps_button.click(None, [], [], js=get_location_js)
+    gps_button.click(fn=None, inputs=None, outputs=None, js=get_location_js)
 
 
 demo.launch()
