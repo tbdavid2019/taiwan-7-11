@@ -2,3 +2,4 @@ gradio
 pandas
 geopy
 requests
+lxml
