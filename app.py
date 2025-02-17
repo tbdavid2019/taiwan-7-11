@@ -34,9 +34,7 @@ def fetch_seven_eleven_data():
                         "store_type": "7-11",
                         "store_name": "未知門市",
                         "name": item.findtext("name", ""),
-                        "kcal": item.findtext("kcal", ""),
-                        "price": item.findtext("price", ""),
-                        "quantity": 1,  # 預設數量
+                        "quantity": 1,
                         "latitude": 0.0,  # 假設沒座標
                         "longitude": 0.0
                     })
@@ -58,7 +56,7 @@ def fetch_family_mart_data():
         for store in data:
             store["store_type"] = "全家"
             store["store_name"] = store.get("name", "未知門市")
-            store["quantity"] = 1  # 預設數量
+            store["quantity"] = 1
             store["latitude"] = store.get("lat", 0.0)
             store["longitude"] = store.get("lng", 0.0)
 
@@ -70,7 +68,11 @@ def fetch_family_mart_data():
 geolocator = Nominatim(user_agent="geoapiExercises", timeout=10)
 
 def find_nearest_store(address, user_lat, user_lon):
-    print("🔍 開始搜尋最近的便利商店...")
+    print(f"🔍 收到查詢請求: address={address}, lat={user_lat}, lon={user_lon}")
+
+    if not user_lat or not user_lon:
+        return [["❌ 請輸入地址或提供 GPS 座標", "", "", ""]]
+
     fetch_seven_eleven_data()
     fetch_family_mart_data()
 
@@ -82,21 +84,10 @@ def find_nearest_store(address, user_lat, user_lon):
     seven_df = pd.DataFrame(seven_eleven_data)
     family_df = pd.DataFrame(family_mart_data)
 
-    if address:
-        try:
-            location = geolocator.geocode(address, timeout=10)
-            if not location:
-                return "❌ 地址無法解析"
-            user_coords = (location.latitude, location.longitude)
-            print(f"📍 地址轉換成功: {user_coords}")
-        except Exception as e:
-            return f"⚠️ 地理編碼錯誤: {e}"
-    elif user_lat and user_lon:
-        user_coords = (user_lat, user_lon)
-        print(f"📍 使用 GPS 座標: {user_coords}")
-    else:
-        return "❌ 請輸入地址或提供 GPS 座標"
+    user_coords = (user_lat, user_lon)
+    print(f"📍 使用 GPS 座標: {user_coords}")
 
+    # 計算距離
     seven_df["distance"] = seven_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
     family_df["distance"] = family_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
 
@@ -143,8 +134,14 @@ with gr.Blocks() as interface:
         () => {
             navigator.geolocation.getCurrentPosition(
                 (position) => {
-                    document.querySelector('input[aria-label="GPS 緯度 (可選)"]').value = position.coords.latitude;
-                    document.querySelector('input[aria-label="GPS 經度 (可選)"]').value = position.coords.longitude;
+                    let latInput = document.querySelector('input[aria-label="GPS 緯度 (可選)"]');
+                    let lonInput = document.querySelector('input[aria-label="GPS 經度 (可選)"]');
+
+                    latInput.value = position.coords.latitude;
+                    lonInput.value = position.coords.longitude;
+
+                    latInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    lonInput.dispatchEvent(new Event('input', { bubbles: true }));
                 },
                 (error) => {
                     alert("無法取得您的 GPS 位置，請允許瀏覽器存取您的位置。");
