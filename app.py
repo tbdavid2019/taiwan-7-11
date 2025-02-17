@@ -8,7 +8,6 @@ from geopy.distance import geodesic
 
 # 7-11 和全家的 JSON 檔案
 seven_eleven_file = "seven_eleven_products.json"
-family_mart_file = "family_mart_products.json"
 family_mart_stores_file = "family_mart_stores.json"
 family_mart_products_file = "family_mart_items.json"
 
@@ -82,77 +81,86 @@ def find_nearest_store(address, lat, lon):
     user_coords = (lat, lon)
     
     # 讀取商店 JSON
-    seven_eleven_data = load_json(seven_eleven_file)
-    family_mart_data = load_json(family_mart_stores_file)
+    seven_data = load_json(seven_eleven_file)
+    family_data = load_json(family_mart_stores_file)
     family_mart_items = load_json(family_mart_products_file)
 
-    # 轉換 DataFrame
-    family_df = pd.DataFrame(family_mart_data)
-
-    # 過濾掉沒有座標的數據
-    family_df = family_df[family_df["latitude"] > 0]
+    # ----------------------------
+    # 將 7-11 資料轉成 DataFrame (依照你實際的 JSON 結構)
+    # ----------------------------
+    # 假設 seven_data 每一筆包含:
+    # {
+    #   "StoreName": "7-11 XXX店",
+    #   "latitude": 25.123,
+    #   "longitude": 121.456,
+    #   ...
+    # }
+    # 請依你實際欄位修改
+    seven_df = pd.DataFrame(seven_data)
+    if not {"latitude", "longitude"}.issubset(seven_df.columns):
+        # 如果 7-11 資料中沒有 latitude/longitude，就先跳過
+        return [["❌ 7-11 資料中找不到經緯度欄位", "", "", "", ""]]
+    
+    # ----------------------------
+    # 將全家資料轉成 DataFrame
+    # ----------------------------
+    # 假設 family_data 裡的欄位是 py_wgs84 / px_wgs84
+    # (py_wgs84 = 緯度, px_wgs84 = 經度)
+    family_df = pd.DataFrame(family_data)
+    if not {"py_wgs84", "px_wgs84"}.issubset(family_df.columns):
+        return [["❌ 全家資料中找不到 py_wgs84 / px_wgs84 欄位", "", "", "", ""]]
+    
+    # 處理經緯度欄位
+    seven_df["latitude"] = seven_df["latitude"].astype(float)
+    seven_df["longitude"] = seven_df["longitude"].astype(float)
+    family_df["latitude"] = family_df["py_wgs84"].astype(float)
+    family_df["longitude"] = family_df["px_wgs84"].astype(float)
 
     # 計算距離
-    family_df["distance"] = family_df.apply(
-        lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1
+    seven_df["distance_m"] = seven_df.apply(
+        lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters,
+        axis=1
+    )
+    family_df["distance_m"] = family_df.apply(
+        lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters,
+        axis=1
     )
 
-    # 過濾 3 公里範圍內的店家
-    family_df = family_df[family_df["distance"] <= MAX_DISTANCE]
+    # 過濾 3 公里範圍內的商店，並只取前 5 間
+    nearby_seven = seven_df[seven_df["distance_m"] <= MAX_DISTANCE].sort_values(by="distance_m").head(5)
+    nearby_family = family_df[family_df["distance_m"] <= MAX_DISTANCE].sort_values(by="distance_m").head(5)
 
-    # 整理輸出格式
-    output = []
-    for _, row in family_df.iterrows():
-        product = next((item for item in family_mart_items if item["title"] == row["Name"]), None)
-        product_name = product["title"] if product else "商品數據"
-        output.append([
-            f"全家 {row['Name']}",
-            f"{row['distance']:.2f} m",
-            product_name,
-            "數量"
-        ])
-
-    if len(output) == 0:
+    # 如果都沒有符合的店家
+    if len(nearby_seven) == 0 and len(nearby_family) == 0:
         return [["❌ 附近 3 公里內沒有便利商店", "", "", "", ""]]
 
+    # 整理成表格輸出 (DataFrame 只能回傳一個，所以可以把兩者合併)
+    output = []
+
+    # 7-11
+    for _, row in nearby_seven.iterrows():
+        store_name = row.get("StoreName", "7-11 未提供店名")
+        dist = f"{row['distance_m']:.2f} m"
+        # 這裡示範把「商品」先寫成 "7-11 商品" 或自行處理
+        output.append([
+            store_name,
+            dist,
+            "7-11 商品(示意)",
+            ""
+        ])
+    
+    # 全家
+    for _, row in nearby_family.iterrows():
+        store_name = row.get("Name", "全家 未提供店名")
+        dist = f"{row['distance_m']:.2f} m"
+        output.append([
+            store_name,
+            dist,
+            "全家 商品(示意)",
+            ""
+        ])
+
     return output
-
-# 獲取 GPS 的 JavaScript (確保可用)
-get_location_js = """
-async function getLocation() {
-    if (!navigator.geolocation) {
-        alert("您的瀏覽器不支援地理位置功能");
-        return;
-    }
-
-    const options = {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0
-    };
-
-    try {
-        const position = await new Promise((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, options);
-        });
-        
-        document.getElementById('lat').value = position.coords.latitude;
-        document.getElementById('lon').value = position.coords.longitude;
-        
-        // 觸發搜尋
-        const searchBtn = document.querySelector('button[id*="search"]');
-        if(searchBtn) searchBtn.click();
-    } catch (err) {
-        if(err.code === 1) {
-            alert("請允許網站存取位置權限");
-        } else {
-            alert("無法取得位置資訊: " + err.message);
-        }
-        console.error(err);
-    }
-}
-getLocation();
-"""
 
 # Gradio UI
 with gr.Blocks() as demo:
@@ -174,9 +182,7 @@ with gr.Blocks() as demo:
 
     search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
-    # 設定 GPS 按鈕的 JavaScript
-
-
+    # 按下「使用目前位置」後，利用 JS 取得地理位置，並自動填入 lat / lon
     gps_button.click(
         None,
         None,
