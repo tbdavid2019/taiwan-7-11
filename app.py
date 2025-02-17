@@ -18,6 +18,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 # 下載 7-11 JSON
 def fetch_seven_eleven_data():
+    print("📥 正在下載 7-11 最新數據...")
     base_url = "https://www.7-11.com.tw/freshfoods/Read_Food_xml_hot.aspx"
     headers = {"User-Agent": "Mozilla/5.0"}
     categories = ["1_Ricerolls", "16_sandwich", "2_Light", "3_Cuisine", "4_Snacks"]
@@ -30,38 +31,46 @@ def fetch_seven_eleven_data():
                 root = ElementTree.fromstring(response.content)
                 for item in root.findall(".//Item"):
                     data.append({
-                        "category": category,
+                        "store_type": "7-11",
+                        "store_name": "未知門市",
                         "name": item.findtext("name", ""),
                         "kcal": item.findtext("kcal", ""),
                         "price": item.findtext("price", ""),
-                        "image": f'https://www.7-11.com.tw/freshfoods/{category}/' + item.findtext("image", ""),
-                        "latitude": 0.0,  # 沒有提供座標
+                        "quantity": 1,  # 預設數量
+                        "latitude": 0.0,  # 假設沒座標
                         "longitude": 0.0
                     })
             except ElementTree.ParseError:
-                print(f"分類 {category} 無法解析")
+                print(f"⚠️  解析 7-11 分類 {category} 失敗")
     
     with open(SEVEN_ELEVEN_FILE, "w", encoding="utf-8") as json_file:
         json.dump(data, json_file, ensure_ascii=False, indent=4)
+    print("✅ 7-11 數據下載完成")
 
 # 下載全家 JSON
 def fetch_family_mart_data():
+    print("📥 正在下載全家最新數據...")
     url = 'https://family.map.com.tw/famiport/api/dropdownlist/Select_StoreName'
     response = requests.post(url, json={"store": ""})
 
     if response.status_code == 200:
         data = response.json()
         for store in data:
+            store["store_type"] = "全家"
+            store["store_name"] = store.get("name", "未知門市")
+            store["quantity"] = 1  # 預設數量
             store["latitude"] = store.get("lat", 0.0)
             store["longitude"] = store.get("lng", 0.0)
 
         with open(FAMILY_MART_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
+    print("✅ 全家數據下載完成")
 
 # 設定地理編碼器
 geolocator = Nominatim(user_agent="geoapiExercises", timeout=10)
 
 def find_nearest_store(address, user_lat, user_lon):
+    print("🔍 開始搜尋最近的便利商店...")
     fetch_seven_eleven_data()
     fetch_family_mart_data()
 
@@ -77,14 +86,16 @@ def find_nearest_store(address, user_lat, user_lon):
         try:
             location = geolocator.geocode(address, timeout=10)
             if not location:
-                return "地址無法解析"
+                return "❌ 地址無法解析"
             user_coords = (location.latitude, location.longitude)
+            print(f"📍 地址轉換成功: {user_coords}")
         except Exception as e:
-            return f"地理編碼錯誤: {e}"
+            return f"⚠️ 地理編碼錯誤: {e}"
     elif user_lat and user_lon:
         user_coords = (user_lat, user_lon)
+        print(f"📍 使用 GPS 座標: {user_coords}")
     else:
-        return "請輸入地址或提供 GPS 座標"
+        return "❌ 請輸入地址或提供 GPS 座標"
 
     seven_df["distance"] = seven_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
     family_df["distance"] = family_df.apply(lambda row: geodesic(user_coords, (row["latitude"], row["longitude"])).meters, axis=1)
@@ -94,24 +105,21 @@ def find_nearest_store(address, user_lat, user_lon):
 
     output = []
     for _, row in nearest_seven.iterrows():
-        output.append({
-            "門市": "7-11 " + row.get("store_name", "未知"),
-            "距離": f"{row['distance']:.2f} 公尺",
-            "食物": row["name"],
-            "卡路里": row["kcal"],
-            "價格": f"${row['price']}",
-            "圖片": row["image"]
-        })
+        output.append([
+            f"{row['store_type']}, {row['store_name']}",
+            f"{row['distance']:.2f} 公尺",
+            row["name"],
+            row["quantity"]
+        ])
     for _, row in nearest_family.iterrows():
-        output.append({
-            "門市": "全家 " + row.get("store_name", "未知"),
-            "距離": f"{row['distance']:.2f} 公尺",
-            "食物": row.get("title", "未知"),
-            "卡路里": row.get("Calories", "未知"),
-            "價格": f"${row.get('price', 'N/A')}",
-            "圖片": row.get("picture_url", "")
-        })
+        output.append([
+            f"{row['store_type']}, {row['store_name']}",
+            f"{row['distance']:.2f} 公尺",
+            row.get("title", "未知"),
+            row["quantity"]
+        ])
 
+    print("✅ 搜尋完成，返回結果")
     return output
 
 # **Gradio UI**
@@ -127,7 +135,7 @@ with gr.Blocks() as interface:
         use_gps_button = gr.Button("使用目前位置")
         search_button = gr.Button("搜尋")
 
-    output_table = gr.Dataframe(headers=["門市", "距離", "食物", "卡路里", "價格", "圖片"])
+    output_table = gr.Dataframe(headers=["門市", "距離", "食物", "數量"])
 
     # **使用目前位置 - 透過 JavaScript 取得 GPS**
     use_gps_button.click(
