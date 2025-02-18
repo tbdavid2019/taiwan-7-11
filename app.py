@@ -22,10 +22,6 @@ MAX_DISTANCE = 3000
 # 7-11: 取得 AccessToken
 # -----------------------------------------------------------
 def get_7_11_token():
-    """
-    POST /Auth/FrontendAuth/AccessToken?mid_v=$mid_v
-    回傳 JWT token
-    """
     url = f"{API_7_11_BASE}/Auth/FrontendAuth/AccessToken?mid_v={MID_V}"
     headers = {
         "user-agent": USER_AGENT_7_11
@@ -42,24 +38,14 @@ def get_7_11_token():
 # 7-11: 取得附近門市清單 (含剩餘即期品總數量)
 # -----------------------------------------------------------
 def get_7_11_nearby_stores(token, lat, lon):
-    """
-    POST /Search/FrontendStoreItemStock/GetNearbyStoreList?token=$token
-    取得附近門市的「即期品」總數量
-    """
     url = f"{API_7_11_BASE}/Search/FrontendStoreItemStock/GetNearbyStoreList?token={token}"
     headers = {
         "user-agent": USER_AGENT_7_11,
         "content-type": "application/json",
     }
     body = {
-        "CurrentLocation": {
-            "Latitude": lat,
-            "Longitude": lon
-        },
-        "SearchLocation": {
-            "Latitude": lat,
-            "Longitude": lon
-        }
+        "CurrentLocation": {"Latitude": lat, "Longitude": lon},
+        "SearchLocation": {"Latitude": lat, "Longitude": lon}
     }
     resp = requests.post(url, headers=headers, json=body)
     resp.raise_for_status()
@@ -72,20 +58,13 @@ def get_7_11_nearby_stores(token, lat, lon):
 # 7-11: 取得單一門市的即期品清單
 # -----------------------------------------------------------
 def get_7_11_store_detail(token, lat, lon, store_no):
-    """
-    POST /Search/FrontendStoreItemStock/GetStoreDetail?token=$token
-    回傳該門市的即期品細項 (商品名稱 / 剩餘數量 等)
-    """
     url = f"{API_7_11_BASE}/Search/FrontendStoreItemStock/GetStoreDetail?token={token}"
     headers = {
         "user-agent": USER_AGENT_7_11,
         "content-type": "application/json",
     }
     body = {
-        "CurrentLocation": {
-            "Latitude": lat,
-            "Longitude": lon
-        },
+        "CurrentLocation": {"Latitude": lat, "Longitude": lon},
         "StoreNo": store_no
     }
     resp = requests.post(url, headers=headers, json=body)
@@ -99,10 +78,6 @@ def get_7_11_store_detail(token, lat, lon, store_no):
 # FamilyMart: 取得附近門市即期品清單 (單次呼叫可拿到所有商品細項)
 # -----------------------------------------------------------
 def get_family_nearby_stores(lat, lon):
-    """
-    POST https://stamp.family.com.tw/api/maps/MapProductInfo
-    查詢附近門市及即期品庫存，回傳資料中 code 應為 1 代表成功
-    """
     headers = {
         "Content-Type": "application/json;charset=utf-8",
     }
@@ -114,7 +89,7 @@ def get_family_nearby_stores(lat, lon):
     resp = requests.post(API_FAMILY, headers=headers, json=body)
     resp.raise_for_status()
     js = resp.json()
-    # 修改判斷：根據回傳範例，成功時 code 為 1
+    # 根據回傳範例，成功時 code 為 1
     if js.get("code") != 1:
         raise RuntimeError(f"取得全家門市資料失敗: {js}")
     return js["data"]
@@ -123,11 +98,6 @@ def get_family_nearby_stores(lat, lon):
 # Gradio 查詢邏輯
 # -----------------------------------------------------------
 def find_nearest_store(address, lat, lon):
-    """
-    1. 使用者輸入經緯度
-    2. 查詢 7-11 與 FamilyMart 的即期品清單
-    3. 合併結果後顯示
-    """
     print(f"🔍 收到查詢請求: address={address}, lat={lat}, lon={lon}")
     if lat == 0 or lon == 0:
         return [["❌ 請輸入地址或提供 GPS 座標", "", "", "", ""]]
@@ -151,11 +121,13 @@ def find_nearest_store(address, lat, lon):
                         for item in cat.get("ItemList", []):
                             item_name = item.get("ItemName", "")
                             item_qty = item.get("RemainingQty", 0)
+                            # 在最後加一個 float 距離欄位以便排序
                             row = [
                                 f"7-11 {store_name}",
                                 f"{dist_m:.1f} m",
                                 f"{cat_name} - {item_name}",
-                                str(item_qty)
+                                str(item_qty),
+                                dist_m  # 供排序用
                             ]
                             result_rows.append(row)
                 else:
@@ -163,7 +135,8 @@ def find_nearest_store(address, lat, lon):
                         f"7-11 {store_name}",
                         f"{dist_m:.1f} m",
                         "即期品 0 項",
-                        "0"
+                        "0",
+                        dist_m  # 供排序用
                     ]
                     result_rows.append(row)
     except Exception as e:
@@ -191,7 +164,8 @@ def find_nearest_store(address, lat, lon):
                                     f"全家 {store_name}",
                                     f"{dist_m:.1f} m",
                                     f"{big_cat_name} - {subcat_name} - {product_name}",
-                                    str(qty)
+                                    str(qty),
+                                    dist_m  # 供排序用
                                 ]
                                 result_rows.append(row)
                 if not has_item:
@@ -199,7 +173,8 @@ def find_nearest_store(address, lat, lon):
                         f"全家 {store_name}",
                         f"{dist_m:.1f} m",
                         "即期品 0 項",
-                        "0"
+                        "0",
+                        dist_m  # 供排序用
                     ]
                     result_rows.append(row)
     except Exception as e:
@@ -208,11 +183,22 @@ def find_nearest_store(address, lat, lon):
     if not result_rows:
         return [["❌ 附近 3 公里內沒有即期食品", "", "", "", ""]]
 
+    # ============= 在這裡進行排序 =============
+    # result_rows 的結構是 [門市, 距離(字串), 商品, 數量, float_distance]
+    # 我們要依照最後一欄 float_distance 做由小到大排序
+    result_rows.sort(key=lambda x: x[4])
+
+    # 排序完之後，再把最後一欄刪掉 (不顯示給使用者)
+    for row in result_rows:
+        row.pop()  # 移除 index=4 (float_distance)
+
     return result_rows
 
 # -----------------------------------------------------------
 # Gradio 介面
 # -----------------------------------------------------------
+import gradio as gr
+
 with gr.Blocks() as demo:
     gr.Markdown("## 便利商店「即期食品」搜尋示範")
     gr.Markdown("""
@@ -263,10 +249,6 @@ with gr.Blocks() as demo:
     )
 
 def main():
-    """
-    主程式入口，在本地端執行:
-      python your_script.py
-    """
     demo.launch(server_name="0.0.0.0", server_port=7860, debug=True)
 
 if __name__ == "__main__":
