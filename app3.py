@@ -7,7 +7,7 @@ from geopy.distance import geodesic
 
 # =============== 7-11 所需常數 ===============
 # 請確認此處的 MID_V 是否有效，若過期請更新
-MID_V = "W0_DiF4DlgU5OeQoRswrRcaaNHMWOL7K3ra3385ocZcv-bBOWySZvoUtH6j-7pjiccl0C5h30uRUNbJXsABCKMqiekSb7tdiBNdVq8Ro5jgk6sgvhZla5iV0H3-8dZfASc7AhEm85679LIK3hxN7Sam6D0LAnYK9Lb0DZhn7xeTeksB4IsBx4Msr_VI"
+MID_V = "W0_DiF4DlgU5OeQoRswrRcaaNHMWOL7K3ra3385ocZcv-bBOWySZvoUtH6j-7pjiccl0C5h30uRUNbJXsABCKMqiekSb7tdiBNdVq8Ro5jgk6sgvhZla5iV0H3-8dZfASc7AhEm85679LIK3hxN7Sam6D0LAnYK9Lb0DZhn7xeTeksB4IsBx4Msr_VI"  # 請填入有效的 mid_v
 USER_AGENT_7_11 = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 API_7_11_BASE = "https://lovefood.openpoint.com.tw/LoveFood/api"
 
@@ -15,17 +15,28 @@ API_7_11_BASE = "https://lovefood.openpoint.com.tw/LoveFood/api"
 FAMILY_PROJECT_CODE = "202106302"  # 若有需要請自行調整
 API_FAMILY = "https://stamp.family.com.tw/api/maps/MapProductInfo"
 
+# 3 公里範圍
+MAX_DISTANCE = 3000
 
+# -----------------------------------------------------------
+# 7-11: 取得 AccessToken
+# -----------------------------------------------------------
 def get_7_11_token():
     url = f"{API_7_11_BASE}/Auth/FrontendAuth/AccessToken?mid_v={MID_V}"
-    headers = {"user-agent": USER_AGENT_7_11}
+    headers = {
+        "user-agent": USER_AGENT_7_11
+    }
     resp = requests.post(url, headers=headers, data="")
     resp.raise_for_status()
     js = resp.json()
     if not js.get("isSuccess"):
         raise RuntimeError(f"取得 7-11 token 失敗: {js}")
-    return js["element"]
+    token = js["element"]
+    return token
 
+# -----------------------------------------------------------
+# 7-11: 取得附近門市清單 (含剩餘即期品總數量)
+# -----------------------------------------------------------
 def get_7_11_nearby_stores(token, lat, lon):
     url = f"{API_7_11_BASE}/Search/FrontendStoreItemStock/GetNearbyStoreList?token={token}"
     headers = {
@@ -43,6 +54,9 @@ def get_7_11_nearby_stores(token, lat, lon):
         raise RuntimeError(f"取得 7-11 附近門市失敗: {js}")
     return js["element"].get("StoreStockItemList", [])
 
+# -----------------------------------------------------------
+# 7-11: 取得單一門市的即期品清單
+# -----------------------------------------------------------
 def get_7_11_store_detail(token, lat, lon, store_no):
     url = f"{API_7_11_BASE}/Search/FrontendStoreItemStock/GetStoreDetail?token={token}"
     headers = {
@@ -60,8 +74,13 @@ def get_7_11_store_detail(token, lat, lon, store_no):
         raise RuntimeError(f"取得 7-11 門市({store_no})資料失敗: {js}")
     return js["element"].get("StoreStockItem", {})
 
+# -----------------------------------------------------------
+# FamilyMart: 取得附近門市即期品清單 (單次呼叫可拿到所有商品細項)
+# -----------------------------------------------------------
 def get_family_nearby_stores(lat, lon):
-    headers = {"Content-Type": "application/json;charset=utf-8"}
+    headers = {
+        "Content-Type": "application/json;charset=utf-8",
+    }
     body = {
         "ProjectCode": FAMILY_PROJECT_CODE,
         "latitude": lat,
@@ -70,20 +89,18 @@ def get_family_nearby_stores(lat, lon):
     resp = requests.post(API_FAMILY, headers=headers, json=body)
     resp.raise_for_status()
     js = resp.json()
+    # 根據回傳範例，成功時 code 為 1
     if js.get("code") != 1:
         raise RuntimeError(f"取得全家門市資料失敗: {js}")
     return js["data"]
 
-def find_nearest_store(address, lat, lon, distance_km):
-    """
-    distance_km: 從下拉選單取得的「公里」(字串)，例如 '3' or '5' ...
-    """
-    print(f"🔍 收到查詢請求: address={address}, lat={lat}, lon={lon}, distance_km={distance_km}")
+# -----------------------------------------------------------
+# Gradio 查詢邏輯
+# -----------------------------------------------------------
+def find_nearest_store(address, lat, lon):
+    print(f"🔍 收到查詢請求: address={address}, lat={lat}, lon={lon}")
     if lat == 0 or lon == 0:
         return [["❌ 請輸入地址或提供 GPS 座標", "", "", "", ""]]
-
-    # 將 km 轉成公尺
-    max_distance = float(distance_km) * 1000
 
     result_rows = []
 
@@ -93,7 +110,7 @@ def find_nearest_store(address, lat, lon, distance_km):
         nearby_stores_711 = get_7_11_nearby_stores(token_711, lat, lon)
         for store in nearby_stores_711:
             dist_m = store.get("Distance", 999999)
-            if dist_m <= max_distance:
+            if dist_m <= MAX_DISTANCE:
                 store_no = store.get("StoreNo")
                 store_name = store.get("StoreName", "7-11 未提供店名")
                 remaining_qty = store.get("RemainingQty", 0)
@@ -104,12 +121,13 @@ def find_nearest_store(address, lat, lon, distance_km):
                         for item in cat.get("ItemList", []):
                             item_name = item.get("ItemName", "")
                             item_qty = item.get("RemainingQty", 0)
+                            # 在最後加一個 float 距離欄位以便排序
                             row = [
                                 f"7-11 {store_name}",
                                 f"{dist_m:.1f} m",
                                 f"{cat_name} - {item_name}",
                                 str(item_qty),
-                                dist_m  # 用來排序
+                                dist_m  # 供排序用
                             ]
                             result_rows.append(row)
                 else:
@@ -118,7 +136,7 @@ def find_nearest_store(address, lat, lon, distance_km):
                         f"{dist_m:.1f} m",
                         "即期品 0 項",
                         "0",
-                        dist_m
+                        dist_m  # 供排序用
                     ]
                     result_rows.append(row)
     except Exception as e:
@@ -129,7 +147,7 @@ def find_nearest_store(address, lat, lon, distance_km):
         nearby_stores_family = get_family_nearby_stores(lat, lon)
         for store in nearby_stores_family:
             dist_m = store.get("distance", 999999)
-            if dist_m <= max_distance:
+            if dist_m <= MAX_DISTANCE:
                 store_name = store.get("name", "全家 未提供店名")
                 info_list = store.get("info", [])
                 has_item = False
@@ -147,7 +165,7 @@ def find_nearest_store(address, lat, lon, distance_km):
                                     f"{dist_m:.1f} m",
                                     f"{big_cat_name} - {subcat_name} - {product_name}",
                                     str(qty),
-                                    dist_m
+                                    dist_m  # 供排序用
                                 ]
                                 result_rows.append(row)
                 if not has_item:
@@ -156,92 +174,82 @@ def find_nearest_store(address, lat, lon, distance_km):
                         f"{dist_m:.1f} m",
                         "即期品 0 項",
                         "0",
-                        dist_m
+                        dist_m  # 供排序用
                     ]
                     result_rows.append(row)
     except Exception as e:
         print(f"❌ 取得全家 即期品時發生錯誤: {e}")
 
     if not result_rows:
-        return [["❌ 附近沒有即期食品 (在所選公里範圍內)", "", "", "", ""]]
+        return [["❌ 附近 3 公里內沒有即期食品", "", "", "", ""]]
 
-    # 排序：依照最後一欄 (float 距離) 做由小到大排序
+    # ============= 在這裡進行排序 =============
+    # result_rows 的結構是 [門市, 距離(字串), 商品, 數量, float_distance]
+    # 我們要依照最後一欄 float_distance 做由小到大排序
     result_rows.sort(key=lambda x: x[4])
-    # 移除最後一欄 (不顯示給前端)
+
+    # 排序完之後，再把最後一欄刪掉 (不顯示給使用者)
     for row in result_rows:
-        row.pop()
+        row.pop()  # 移除 index=4 (float_distance)
 
     return result_rows
 
-# ========== Gradio 介面 ==========
-
+# -----------------------------------------------------------
+# Gradio 介面
+# -----------------------------------------------------------
 import gradio as gr
 
-def main():
-    with gr.Blocks() as demo:
-        gr.Markdown("## 台灣7-11 和 family全家便利商店「即期食品」 乞丐時光搜尋")
-        gr.Markdown("""
-        1. 按下「使用目前位置」或自行輸入緯度/經度  
-        2. 選擇「搜尋範圍 (公里)」  
-        3. 點選「搜尋」查詢 7-11 / 全家family 的即期品  
-        4. 意見反應 telegram @a7a8a9abc            
-        """)
+with gr.Blocks() as demo:
+    gr.Markdown("## 便利商店「即期食品」搜尋示範")
+    gr.Markdown("""
+    1. 按下「使用目前位置」或自行輸入緯度/經度  
+    2. 點選「搜尋」查詢 3 公里內 7-11 / 全家的即期品  
+    3. 若要執行，需要有效的 mid_v (7-11 愛食記憶官網)  
+    4. 在 Logs 查看詳細錯誤或除錯資訊
+    """)
+    address = gr.Textbox(label="輸入地址(可留空)")
+    lat = gr.Number(label="GPS 緯度", value=0, elem_id="lat")
+    lon = gr.Number(label="GPS 經度", value=0, elem_id="lon")
 
-        address = gr.Textbox(label="輸入地址(可留空)")
-        lat = gr.Number(label="GPS 緯度", value=0, elem_id="lat")
-        lon = gr.Number(label="GPS 經度", value=0, elem_id="lon")
+    with gr.Row():
+        gps_button = gr.Button("📍 ❶ 使用目前位置-先按這個 並等待3秒 ", elem_id="gps-btn")
+        search_button = gr.Button("🔍 ❷ 搜尋 ")
 
-        # 下拉選單，提供可選距離 (公里)
-        distance_dropdown = gr.Dropdown(
-            label="搜尋範圍 (公里)",
-            choices=["3", "5", "7", "13", "21"],
-            value="3",        # 預設 3 公里
-            interactive=True
-        )
+    output_table = gr.Dataframe(
+        headers=["門市", "距離 (m)", "商品/即期食品", "數量"],
+        interactive=False
+    )
 
-        with gr.Row():
-            gps_button = gr.Button("📍 ❶ 使用目前位置-先按這個 並等待3秒 ", elem_id="gps-btn")
-            search_button = gr.Button("🔍 ❷ 搜尋 ")
+    search_button.click(fn=find_nearest_store, inputs=[address, lat, lon], outputs=output_table)
 
-        output_table = gr.Dataframe(
-            headers=["門市", "距離 (m)", "商品/即期食品", "數量"],
-            interactive=False
-        )
-
-        # 將 distance_dropdown 傳入函式
-        search_button.click(
-            fn=find_nearest_store,
-            inputs=[address, lat, lon, distance_dropdown],
-            outputs=output_table
-        )
-
-        gps_button.click(
-            None,
-            None,
-            [lat, lon],
-            js="""
-            () => {
-                return new Promise((resolve) => {
-                    if (!navigator.geolocation) {
-                        alert("您的瀏覽器不支援地理位置功能");
+    gps_button.click(
+        None,
+        None,
+        [lat, lon],
+        js="""
+        () => {
+            return new Promise((resolve) => {
+                if (!navigator.geolocation) {
+                    alert("您的瀏覽器不支援地理位置功能");
+                    resolve([0, 0]);
+                    return;
+                }
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        resolve([position.coords.latitude, position.coords.longitude]);
+                    },
+                    (error) => {
+                        alert("無法取得位置：" + error.message);
                         resolve([0, 0]);
-                        return;
                     }
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            resolve([position.coords.latitude, position.coords.longitude]);
-                        },
-                        (error) => {
-                            alert("無法取得位置：" + error.message);
-                            resolve([0, 0]);
-                        }
-                    );
-                });
-            }
-            """
-        )
+                );
+            });
+        }
+        """
+    )
 
-        demo.launch(server_name="0.0.0.0", server_port=7860, debug=True)
+def main():
+    demo.launch(server_name="0.0.0.0", server_port=7860, debug=True)
 
 if __name__ == "__main__":
     main()
