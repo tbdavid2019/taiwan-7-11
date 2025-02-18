@@ -226,8 +226,8 @@ with gr.Blocks() as demo:
     lon = gr.Number(label="GPS 經度", value=0, elem_id="lon")
 
     with gr.Row():
-        gps_button = gr.Button("📍 使用目前位置", elem_id="gps-btn")
-        search_button = gr.Button("🔍 搜尋")
+        gps_button = gr.Button("📍 ❶ 使用目前位置-先按這個 並等待3秒 ", elem_id="gps-btn")
+        search_button = gr.Button("🔍 ❷ 搜尋 ")
 
     output_table = gr.Dataframe(
         headers=["門市", "距離 (m)", "商品/即期食品", "數量"],
