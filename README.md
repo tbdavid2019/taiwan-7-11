@@ -33,23 +33,27 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 1. 安裝 Python 3.8+ 及套件：
    ```bash
    pip install gradio requests pandas geopy
+	```
 
-	2.	執行：
+2.	執行：
 
-python app.py
+	```
+	python app.py
+	```
 
+3.	瀏覽器打開 http://127.0.0.1:7860，即可看到查詢介面。
 
-	3.	瀏覽器打開 http://127.0.0.1:7860，即可看到查詢介面。
 
 注意事項
 	•	此為個人練習與技術示範，非官方專案。
 	•	若出現「憑證過期」或「Token 失敗」等訊息，表示 MID_V 失效，需要更新。
 
+---
 Convenience Store Expiring-Food Query (7-11 / FamilyMart)
 
 This project uses unofficial APIs to query expiring-food items in Taiwan’s 7-11 and FamilyMart convenience stores.
 
-	Note:
+Note:
 		1.	A valid MID_V is required to access 7-11’s data. MID_V may expire as the official app updates. You must capture or obtain it by yourself.
 	2.	FamilyMart’s API might change or be discontinued without notice.
 	3.	This project is for educational and research purposes only. Please do not use it for commercial or illegal purposes.
@@ -60,24 +64,18 @@ Features
 	•	Display each store’s expiring-food items and remaining quantity.
 
 Usage
-	1.	Install Python 3.8+ and dependencies:
-
+1.	Install Python 3.8+ and dependencies:
+```
 pip install gradio requests pandas geopy
+```
 
-
-	2.	Run:
-
+2.	Run:
+```
 python app.py
+```
 
+3.	Open http://127.0.0.1:7860 in your browser to see the interface.
 
-	3.	Open http://127.0.0.1:7860 in your browser to see the interface.
-
-Disclaimer
-	•	This is a personal practice/demo project, not affiliated with or endorsed by 7-11 or FamilyMart.
-	•	If you see “certificate expired” or “token error,” it means MID_V is invalid and must be updated.
-
-> - 你可以將上述內容直接複製到 `README.md` 放到 GitHub。  
-> - 若有更多需求，可自行在 README 中補充專案背景、技術細節、授權條款等。
 
 ---
 
