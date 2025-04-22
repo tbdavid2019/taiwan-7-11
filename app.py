@@ -80,28 +80,32 @@ def find_nearest_store(address, lat, lon, distance_km):
     """
     print(f"🔍 收到查詢請求: address={address}, lat={lat}, lon={lon}, distance_km={distance_km}")
 
-    # 若有填地址但 lat/lon 為 0，嘗試 geocoding
+    # 若有填地址但 lat/lon 為 0，嘗試用 Google Geocoding API
     if address and address.strip() != "" and (lat == 0 or lon == 0):
         try:
             import requests
-            geocode_url = f"https://nominatim.openstreetmap.org/search"
+            import os
+            googlekey = os.environ.get("googlekey")
+            if not googlekey:
+                raise RuntimeError("未設定 googlekey，請於 Huggingface Space Secrets 設定。")
+            geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
             params = {
-                "q": address,
-                "format": "json",
-                "limit": 1,
-                "countrycodes": "tw"
+                "address": address,
+                "key": googlekey
             }
-            resp = requests.get(geocode_url, params=params, headers={"User-Agent": "7-11-finder/1.0"})
+            resp = requests.get(geocode_url, params=params)
             resp.raise_for_status()
             data = resp.json()
-            if data:
-                lat = float(data[0]["lat"])
-                lon = float(data[0]["lon"])
+            if data.get("status") == "OK" and data.get("results"):
+                location = data["results"][0]["geometry"]["location"]
+                lat = float(location["lat"])
+                lon = float(location["lng"])
                 print(f"地址轉換成功: {address} => lat={lat}, lon={lon}")
             else:
+                print(f"❌ Google Geocoding 失敗: {data}")
                 return [["❌ 地址轉換失敗，請輸入正確地址", "", "", "", ""]], 0, 0
         except Exception as e:
-            print(f"❌ 地址轉換失敗: {e}")
+            print(f"❌ Google Geocoding 失敗: {e}")
             return [["❌ 地址轉換失敗，請輸入正確地址", "", "", "", ""]], 0, 0
 
     if lat == 0 or lon == 0:
