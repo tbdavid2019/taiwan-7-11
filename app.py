@@ -79,8 +79,33 @@ def find_nearest_store(address, lat, lon, distance_km):
     distance_km: 從下拉選單取得的「公里」(字串)，例如 '3' or '5' ...
     """
     print(f"🔍 收到查詢請求: address={address}, lat={lat}, lon={lon}, distance_km={distance_km}")
+
+    # 若有填地址但 lat/lon 為 0，嘗試 geocoding
+    if address and address.strip() != "" and (lat == 0 or lon == 0):
+        try:
+            import requests
+            geocode_url = f"https://nominatim.openstreetmap.org/search"
+            params = {
+                "q": address,
+                "format": "json",
+                "limit": 1,
+                "countrycodes": "tw"
+            }
+            resp = requests.get(geocode_url, params=params, headers={"User-Agent": "7-11-finder/1.0"})
+            resp.raise_for_status()
+            data = resp.json()
+            if data:
+                lat = float(data[0]["lat"])
+                lon = float(data[0]["lon"])
+                print(f"地址轉換成功: {address} => lat={lat}, lon={lon}")
+            else:
+                return [["❌ 地址轉換失敗，請輸入正確地址", "", "", "", ""]], 0, 0
+        except Exception as e:
+            print(f"❌ 地址轉換失敗: {e}")
+            return [["❌ 地址轉換失敗，請輸入正確地址", "", "", "", ""]], 0, 0
+
     if lat == 0 or lon == 0:
-        return [["❌ 請輸入地址或提供 GPS 座標", "", "", "", ""]]
+        return [["❌ 請輸入地址或提供 GPS 座標", "", "", "", ""]], lat, lon
 
     # 將 km 轉成公尺
     max_distance = float(distance_km) * 1000
@@ -163,7 +188,7 @@ def find_nearest_store(address, lat, lon, distance_km):
         print(f"❌ 取得全家 即期品時發生錯誤: {e}")
 
     if not result_rows:
-        return [["❌ 附近沒有即期食品 (在所選公里範圍內)", "", "", "", ""]]
+        return [["❌ 附近沒有即期食品 (在所選公里範圍內)", "", "", "", ""]], lat, lon
 
     # 排序：依照最後一欄 (float 距離) 做由小到大排序
     result_rows.sort(key=lambda x: x[4])
