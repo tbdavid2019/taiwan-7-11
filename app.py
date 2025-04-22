@@ -171,7 +171,7 @@ def find_nearest_store(address, lat, lon, distance_km):
     for row in result_rows:
         row.pop()
 
-    return result_rows
+    return result_rows, lat, lon
 
 # ========== Gradio 介面 ==========
 
@@ -237,7 +237,7 @@ def main():
         #     """
         # )
 
-        # 修正版：自動定位並搜尋，查詢同時回填 lat/lon 欄位
+        # 修正版：自動定位並搜尋，查詢同時回填 lat/lon 欄位，address 有填時不抓 GPS
         auto_gps_search_button.click(
             fn=find_nearest_store,
             inputs=[address, lat, lon, distance_dropdown],
@@ -247,11 +247,15 @@ def main():
                 function isZero(val) {
                     return !val || Number(val) === 0;
                 }
-                if (!isZero(lat) && !isZero(lon)) {
-                    // 使用者自填，直接查詢並回填現有值
+                if (address && address.trim() !== "") {
+                    // 有填地址，直接查詢，不抓 GPS
                     return [address, Number(lat), Number(lon), distance, Number(lat), Number(lon)];
                 }
-                // 需要抓 GPS
+                if (!isZero(lat) && !isZero(lon)) {
+                    // 沒填地址但有座標，直接查詢
+                    return [address, Number(lat), Number(lon), distance, Number(lat), Number(lon)];
+                }
+                // 沒填地址且沒座標，抓 GPS
                 return new Promise((resolve) => {
                     if (!navigator.geolocation) {
                         alert("您的瀏覽器不支援地理位置功能");
