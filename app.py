@@ -181,10 +181,9 @@ def main():
     with gr.Blocks() as demo:
         gr.Markdown("## 台灣7-11 和 family全家便利商店「即期食品」 乞丐時光搜尋")
         gr.Markdown("""
-        1. 按下「使用目前位置」或自行輸入緯度/經度  
-        2. 選擇「搜尋範圍 (公里)」  
-        3. 點選「搜尋」查詢 7-11 / 全家family 的即期品  
-        4. 意見反應 telegram @a7a8a9abc            
+        1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
+        2. 也可手動輸入地址、緯度、經度與搜尋範圍後再按此按鈕
+        3. 意見反應 telegram @a7a8a9abc
         """)
 
         address = gr.Textbox(label="輸入地址(可留空)")
@@ -200,40 +199,37 @@ def main():
         )
 
         with gr.Row():
-            gps_button = gr.Button("📍 ❶ 使用目前位置-先按這個 並等待3秒 ", elem_id="gps-btn")
-            search_button = gr.Button("🔍 ❷ 搜尋 ")
+            auto_gps_search_button = gr.Button("📍🔍 自動定位並搜尋", elem_id="auto-gps-search-btn")
 
         output_table = gr.Dataframe(
             headers=["門市", "距離 (m)", "商品/即期食品", "數量"],
             interactive=False
         )
 
-        # 將 distance_dropdown 傳入函式
-        search_button.click(
+        # 只保留自動定位並搜尋按鈕
+
+        # (已移除 gps_button)
+
+        # 新增自動定位並搜尋按鈕
+        auto_gps_search_button.click(
             fn=find_nearest_store,
             inputs=[address, lat, lon, distance_dropdown],
-            outputs=output_table
-        )
-
-        gps_button.click(
-            None,
-            None,
-            [lat, lon],
+            outputs=output_table,
             js="""
-            () => {
+            (address, lat, lon, distance) => {
                 return new Promise((resolve) => {
                     if (!navigator.geolocation) {
                         alert("您的瀏覽器不支援地理位置功能");
-                        resolve([0, 0]);
+                        resolve([address, 0, 0, distance]);
                         return;
                     }
                     navigator.geolocation.getCurrentPosition(
                         (position) => {
-                            resolve([position.coords.latitude, position.coords.longitude]);
+                            resolve([address, position.coords.latitude, position.coords.longitude, distance]);
                         },
                         (error) => {
                             alert("無法取得位置：" + error.message);
-                            resolve([0, 0]);
+                            resolve([address, 0, 0, distance]);
                         }
                     );
                 });
