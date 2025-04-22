@@ -237,36 +237,36 @@ def main():
         #     """
         # )
 
-        # 修正版：自動定位並搜尋，僅回傳查詢結果
+        # 修正版：自動定位並搜尋，查詢同時回填 lat/lon 欄位
         auto_gps_search_button.click(
             fn=find_nearest_store,
             inputs=[address, lat, lon, distance_dropdown],
-            outputs=output_table,
+            outputs=[output_table, lat, lon],
             js="""
             (address, lat, lon, distance) => {
                 function isZero(val) {
                     return !val || Number(val) === 0;
                 }
                 if (!isZero(lat) && !isZero(lon)) {
-                    // 使用者自填，直接查詢
-                    return [address, Number(lat), Number(lon), distance];
+                    // 使用者自填，直接查詢並回填現有值
+                    return [address, Number(lat), Number(lon), distance, Number(lat), Number(lon)];
                 }
                 // 需要抓 GPS
                 return new Promise((resolve) => {
                     if (!navigator.geolocation) {
                         alert("您的瀏覽器不支援地理位置功能");
-                        resolve([address, 0, 0, distance]);
+                        resolve([address, 0, 0, distance, 0, 0]);
                         return;
                     }
                     navigator.geolocation.getCurrentPosition(
                         (position) => {
                             const newLat = position.coords.latitude;
                             const newLon = position.coords.longitude;
-                            resolve([address, newLat, newLon, distance]);
+                            resolve([address, newLat, newLon, distance, newLat, newLon]);
                         },
                         (error) => {
                             alert("無法取得位置：" + error.message);
-                            resolve([address, 0, 0, distance]);
+                            resolve([address, 0, 0, distance, 0, 0]);
                         }
                     );
                 });
