@@ -215,7 +215,7 @@ def main():
         3. 意見反應 telegram @a7a8a9abc
         """)
 
-        address = gr.Textbox(label="輸入地址(可留空)")
+        address = gr.Textbox(label="地址(可留空)", placeholder="可留空白,通常不用填")
         lat = gr.Number(label="GPS 緯度", value=0, elem_id="lat")
         lon = gr.Number(label="GPS 經度", value=0, elem_id="lon")
 

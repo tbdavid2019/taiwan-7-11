@@ -25,7 +25,7 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 > 3. 本專案僅供研究教學之用，請勿用於商業或非法目的。
 
 ## 功能
-- 以 GPS 座標或地址（目前僅示意）搜尋附近的 7-11 / 全家門市。
+- 以 GPS 座標或地址（自動轉換為經緯度，支援 Google Geocoding API）搜尋附近的 7-11 / 全家門市。
 - 可自訂搜尋範圍（3 / 5 / 7 / 13 / 21 公里）。
 - 顯示每間門市的即期食品清單與剩餘數量。
 
@@ -33,7 +33,7 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 1. 安裝 Python 3.8+ 及套件：
    ```bash
    pip install gradio requests pandas geopy
-	```
+   ```
 
 2.	執行：
 
@@ -45,8 +45,11 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 
 
 注意事項
-	•	此為個人練習與技術示範，非官方專案。
-	•	若出現「憑證過期」或「Token 失敗」等訊息，表示 MID_V 失效，需要更新。
+- 此為個人練習與技術示範，非官方專案。
+- 若出現「憑證過期」或「Token 失敗」等訊息，表示 MID_V 失效，需要更新。
+- 地址查詢需設定 Google Geocoding API 金鑰於環境變數 `googlekey`（Huggingface Space Secrets）。
+
+- For address search, set your Google Geocoding API key in the environment variable `googlekey` (Huggingface Space Secrets).
 
 ---
 Convenience Store Expiring-Food Query (7-11 / FamilyMart)
@@ -59,14 +62,14 @@ Note:
 	3.	This project is for educational and research purposes only. Please do not use it for commercial or illegal purposes.
 
 Features
-	•	Search nearby 7-11 / FamilyMart stores by GPS coordinates.
+	•	Search nearby 7-11 / FamilyMart stores by GPS coordinates or address (auto geocoding via Google API).
 	•	Customizable search radius (3 / 5 / 7 / 13 / 21 km).
 	•	Display each store’s expiring-food items and remaining quantity.
 
 Usage
 1.	Install Python 3.8+ and dependencies:
 ```
-pip install gradio requests pandas geopy
+pip install gradio requests pandas
 ```
 
 2.	Run:
