@@ -101,17 +101,13 @@ def _to_float(value):
         return None
 
 
-def _generate_map_url(center_lat, center_lon, markers):
-    """生成 Google Maps Static API 圖片 URL"""
-    if not GOOGLE_MAPS_API_KEY:
-        print("⚠️ 警告：未設定 GOOGLE_MAPS_API_KEY，地圖無法顯示")
-        return None
-    
+def _generate_map_html(center_lat, center_lon, markers):
+    """生成互動式 Google Maps HTML（優先方案）"""
     if not markers:
         print("⚠️ 警告：沒有門市標記資料")
         return None
 
-    print(f"🗺️ 準備生成地圖：中心點 ({center_lat}, {center_lon})，門市數量：{len(markers)}")
+    print(f"🗺️ [方案1: HTML] 準備生成互動地圖：中心點 ({center_lat}, {center_lon})，門市數量：{len(markers)}")
 
     center_lat = _to_float(center_lat)
     center_lon = _to_float(center_lon)
@@ -129,24 +125,77 @@ def _generate_map_url(center_lat, center_lon, markers):
         print("❌ 錯誤：無法確定地圖中心點座標")
         return None
     
-    # 隱藏 API key 前幾個字元用於 debug
-    api_key_preview = GOOGLE_MAPS_API_KEY[:10] + "..." if len(GOOGLE_MAPS_API_KEY) > 10 else "短金鑰"
-    print(f"✅ 使用 Google Maps API Key: {api_key_preview}")
+    # 使用 iframe 方式嵌入 Google Maps（不需要 API key）
+    maps_url = f"https://www.google.com/maps/search/?api=1&query={center_lat},{center_lon}&zoom=14"
     
-    # 建立標記字串（最多顯示前 10 個門市）
+    html = f"""
+<div style="width: 100%; max-width: 900px; margin: 0 auto;">
+    <div style="width: 100%; height: 450px; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-bottom: 16px;">
+        <iframe 
+            width="100%" 
+            height="100%" 
+            frameborder="0" 
+            style="border:0"
+            referrerpolicy="no-referrer-when-downgrade"
+            src="{maps_url}"
+            allowfullscreen>
+        </iframe>
+    </div>
+    <div style="text-align: center; color: #666; font-size: 14px;">
+        <p style="margin: 8px 0;">
+            📍 找到 <strong>{len(markers)}</strong> 個門市 | 
+            <a href="{maps_url}" target="_blank" style="color: #1a73e8; text-decoration: none; font-weight: 500;">
+                🔗 在新分頁開啟完整地圖
+            </a>
+        </p>
+    </div>
+</div>
+"""
+    
+    print(f"✅ [方案1: HTML] iframe 地圖生成成功，顯示 {len(markers)} 個門市")
+    return html
+
+
+def _generate_map_static(center_lat, center_lon, markers):
+    """生成 Google Maps Static API 圖片 HTML（備用方案）"""
+    if not GOOGLE_MAPS_API_KEY:
+        print("⚠️ [方案2: 靜態圖] 警告：未設定 GOOGLE_MAPS_API_KEY，無法生成靜態地圖")
+        return None
+    
+    if not markers:
+        return None
+
+    print(f"🗺️ [方案2: 靜態圖] 準備生成靜態地圖：中心點 ({center_lat}, {center_lon})，門市數量：{len(markers)}")
+
+    center_lat = _to_float(center_lat)
+    center_lon = _to_float(center_lon)
+
+    if center_lat is None or center_lon is None:
+        for marker in markers:
+            lat_candidate = _to_float(marker.get("lat"))
+            lon_candidate = _to_float(marker.get("lng"))
+            if lat_candidate is not None and lon_candidate is not None:
+                center_lat = lat_candidate
+                center_lon = lon_candidate
+                break
+
+    if center_lat is None or center_lon is None:
+        return None
+    
+    # 建立標記字串
     marker_params = []
-    for idx, marker in enumerate(markers[:10]):
+    for marker in markers[:10]:
         lat = _to_float(marker.get("lat"))
         lng = _to_float(marker.get("lng"))
+        map_num = marker.get("map_number", "")
         if lat is not None and lng is not None:
-            # 用不同顏色區分品牌
             color = "red" if "7-11" in marker.get("title", "") else "blue"
-            label = str(idx + 1) if idx < 9 else ""
+            # 使用 map_number 作為標籤
+            label = str(map_num) if map_num else ""
             marker_params.append(f"color:{color}|label:{label}|{lat},{lng}")
     
     markers_str = "&".join([f"markers={m}" for m in marker_params])
     
-    # Google Maps Static API URL
     zoom = 14 if len(markers) > 1 else 15
     map_url = (
         f"https://maps.googleapis.com/maps/api/staticmap?"
@@ -158,8 +207,100 @@ def _generate_map_url(center_lat, center_lon, markers):
         f"&key={GOOGLE_MAPS_API_KEY}"
     )
     
-    print(f"✅ 地圖 URL 生成完成，包含 {len(marker_params)} 個標記")
-    return map_url
+    # 包裝成 HTML img 標籤，並加上門市編號對照表
+    maps_link = f"https://www.google.com/maps/search/?api=1&query={center_lat},{center_lon}"
+    
+    # 生成門市編號對照表
+    store_legend = []
+    for marker in markers[:10]:
+        map_num = marker.get("map_number", "")
+        title = marker.get("title", "門市")
+        dist = marker.get("distance_m", 0)
+        color = "🔴" if "7-11" in title else "🔵"
+        store_legend.append(
+            f'<div style="margin: 4px 0; text-align: left;">'
+            f'{color} <strong>{map_num}</strong>. {title} ({dist:.0f}m)'
+            f'</div>'
+        )
+    
+    legend_html = "".join(store_legend)
+    
+    html = f"""
+<div style="width: 100%; max-width: 900px; margin: 0 auto;">
+    <div style="width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-bottom: 16px;">
+        <img src="{map_url}" alt="門市地圖" style="width: 100%; height: auto; display: block;" />
+    </div>
+    <div style="text-align: center; color: #666; font-size: 14px; margin-bottom: 16px;">
+        <p style="margin: 8px 0;">
+            📍 找到 <strong>{len(markers)}</strong> 個門市 | 
+            <a href="{maps_link}" target="_blank" style="color: #1a73e8; text-decoration: none; font-weight: 500;">
+                🔗 在新分頁開啟完整地圖
+            </a>
+        </p>
+    </div>
+    <div style="background: #f8f9fa; border-radius: 8px; padding: 12px; font-size: 13px;">
+        <div style="font-weight: bold; margin-bottom: 8px; color: #333;">📋 地圖標記對照：</div>
+        {legend_html}
+    </div>
+</div>
+"""
+    
+    print(f"✅ [方案2: 靜態圖] 地圖 HTML 生成完成，包含 {len(marker_params)} 個標記")
+    return html
+
+
+def _generate_map_markdown(center_lat, center_lon, markers):
+    """生成包含 Google Maps 連結的 Markdown（最終備用方案）"""
+    if not markers:
+        print("⚠️ 警告：沒有門市標記資料")
+        return None
+
+    print(f"🗺️ [方案3: Markdown] 準備生成文字連結：中心點 ({center_lat}, {center_lon})，門市數量：{len(markers)}")
+
+    center_lat = _to_float(center_lat)
+    center_lon = _to_float(center_lon)
+
+    if center_lat is None or center_lon is None:
+        for marker in markers:
+            lat_candidate = _to_float(marker.get("lat"))
+            lon_candidate = _to_float(marker.get("lng"))
+            if lat_candidate is not None and lon_candidate is not None:
+                center_lat = lat_candidate
+                center_lon = lon_candidate
+                break
+
+    if center_lat is None or center_lon is None:
+        print("❌ 錯誤：無法確定地圖中心點座標")
+        return None
+    
+    # 生成門市列表文字
+    store_list = []
+    for idx, marker in enumerate(markers[:10], 1):
+        title = marker.get("title", "門市")
+        lat = _to_float(marker.get("lat"))
+        lng = _to_float(marker.get("lng"))
+        dist = marker.get("distance_m")
+        
+        if lat and lng:
+            # 生成 Google Maps 連結
+            maps_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+            dist_text = f" ({dist:.0f}m)" if dist else ""
+            store_list.append(f"{idx}. [{title}]({maps_link}){dist_text}")
+    
+    # 生成顯示所有門市的地圖連結
+    all_markers_url = f"https://www.google.com/maps/search/?api=1&query={center_lat},{center_lon}"
+    
+    markdown_text = f"""
+### 📍 找到 {len(markers)} 個門市
+
+[🗺️ 在 Google Maps 查看完整地圖]({all_markers_url})
+
+#### 門市列表（點擊查看位置）：
+{chr(10).join(store_list[:10])}
+"""
+    
+    print(f"✅ [方案3: Markdown] 地圖連結生成完成，包含 {len(store_list)} 個門市")
+    return markdown_text
 
 
 def find_nearest_store(address, lat, lon, distance_km):
@@ -427,10 +568,66 @@ def find_nearest_store(address, lat, lon, distance_km):
 
     markers.sort(key=lambda item: item.get("distance_m") if item.get("distance_m") is not None else float("inf"))
 
-    map_url = _generate_map_url(lat, lon, markers)
-    map_component = gr.update(value=map_url, visible=True) if map_url else hidden_map
+    # 為 markers 加上編號（從 1 開始）
+    for idx, marker in enumerate(markers, 1):
+        marker["map_number"] = idx
 
-    return result_rows, lat, lon, map_component
+    # 在 result_rows 前面加上對應的地圖編號
+    # 建立 store_key 到 map_number 的映射
+    store_to_number = {}
+    for marker in markers:
+        # 從 title 中提取 store_key（brand + store_no）
+        title = marker.get("title", "")
+        store_to_number[title] = marker.get("map_number", "")
+    
+    # 為每個 result_row 加上地圖編號
+    for row in result_rows:
+        store_name = row[0]  # 例如 "7-11 龍門" 或 "全家 宜農"
+        
+        # 在 map_store_info 中找到對應的 store_key
+        matched_number = ""
+        for store_key, entry in map_store_info.items():
+            if entry.get("title") == store_name:
+                matched_number = store_to_number.get(store_name, "")
+                break
+        
+        # 在最前面插入地圖編號
+        row.insert(0, str(matched_number) if matched_number else "-")
+
+    # 優先嘗試 HTML iframe 方式（不需要 API key）
+    try:
+        map_display = _generate_map_html(lat, lon, markers)
+        if map_display:
+            print("✅ 使用方案1: HTML iframe 地圖")
+            map_component = gr.update(value=map_display, visible=True)
+            return result_rows, lat, lon, map_component
+    except Exception as e:
+        print(f"⚠️ 方案1失敗: {e}")
+    
+    # 備用方案：使用靜態圖片（需要 API key）
+    try:
+        if GOOGLE_MAPS_API_KEY:
+            map_url = _generate_map_static(lat, lon, markers)
+            if map_url:
+                print("✅ 使用方案2: Static API 靜態圖片")
+                map_component = gr.update(value=map_url, visible=True)
+                return result_rows, lat, lon, map_component
+    except Exception as e:
+        print(f"⚠️ 方案2失敗: {e}")
+    
+    # 最終備用方案：使用 Markdown 連結（無需 API key）
+    try:
+        map_markdown = _generate_map_markdown(lat, lon, markers)
+        if map_markdown:
+            print("✅ 使用方案3: Markdown 文字連結")
+            map_component = gr.update(value=map_markdown, visible=True)
+            return result_rows, lat, lon, map_component
+    except Exception as e:
+        print(f"⚠️ 方案3失敗: {e}")
+    
+    # 所有方案都失敗，隱藏地圖但不影響主要功能
+    print("ℹ️ 地圖功能暫時無法使用，但門市搜尋功能正常")
+    return result_rows, lat, lon, hidden_map
 
 # ========== Gradio 介面 ==========
 
@@ -460,10 +657,11 @@ def main():
         with gr.Row():
             auto_gps_search_button = gr.Button("📍🔍 自動定位並搜尋", elem_id="auto-gps-search-btn")
 
-        map_image = gr.Image(label="門市地圖", visible=False, elem_id="store-map-container", show_label=True)
+        # 使用 HTML 組件支援 iframe，同時可以顯示靜態圖片或 Markdown
+        map_display = gr.HTML(label="門市地圖", visible=False, elem_id="store-map-container", show_label=True)
 
         output_table = gr.Dataframe(
-            headers=["門市", "距離 (m)", "商品/即期食品", "數量"],
+            headers=["地圖編號", "門市", "距離 (m)", "商品/即期食品", "數量"],
             interactive=False
         )
 
@@ -502,7 +700,7 @@ def main():
         auto_gps_search_button.click(
             fn=find_nearest_store,
             inputs=[address, lat, lon, distance_dropdown],
-            outputs=[output_table, lat, lon, map_image],
+            outputs=[output_table, lat, lon, map_display],
             js="""
             (address, lat, lon, distance) => {
                 function isZero(val) {
