@@ -101,7 +101,8 @@ def _to_float(value):
         return None
 
 
-def _generate_map_html(center_lat, center_lon, markers):
+def _generate_map_url(center_lat, center_lon, markers):
+    """生成 Google Maps Static API 圖片 URL"""
     if not GOOGLE_MAPS_API_KEY:
         print("⚠️ 警告：未設定 GOOGLE_MAPS_API_KEY，地圖無法顯示")
         return None
@@ -127,145 +128,39 @@ def _generate_map_html(center_lat, center_lon, markers):
     if center_lat is None or center_lon is None:
         print("❌ 錯誤：無法確定地圖中心點座標")
         return None
-
-    container_id = f"store-map-{uuid.uuid4().hex}"
-    markers_json = json.dumps(markers, ensure_ascii=False)
-    center_json = json.dumps({"lat": center_lat, "lng": center_lon})
     
     # 隱藏 API key 前幾個字元用於 debug
     api_key_preview = GOOGLE_MAPS_API_KEY[:10] + "..." if len(GOOGLE_MAPS_API_KEY) > 10 else "短金鑰"
     print(f"✅ 使用 Google Maps API Key: {api_key_preview}")
-
-    html = """
-<div id="{container_id}" style="width: 100%; min-height: 420px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); background: #f0f0f0;"></div>
-<script>
-(() => {{
-    const containerId = "{container_id}";
-    const center = {center_json};
-    const markers = {markers_json};
     
-    console.log('🗺️ 地圖初始化開始:', {{ containerId, center, markerCount: markers.length }});
-
-    const ensureScript = () => {{
-        if (!window.__googleMapsLoader) {{
-            console.log('📦 載入 Google Maps API...');
-            window.__googleMapsLoader = new Promise((resolve, reject) => {{
-                const script = document.createElement('script');
-                script.src = "https://maps.googleapis.com/maps/api/js?key={api_key}";
-                script.async = true;
-                script.defer = true;
-                script.onload = () => {{
-                    console.log('✅ Google Maps API 載入成功');
-                    resolve();
-                }};
-                script.onerror = (err) => {{
-                    console.error('❌ Google Maps API 載入失敗:', err);
-                    reject(err);
-                }};
-                document.head.appendChild(script);
-            }});
-        }}
-        return window.__googleMapsLoader;
-    }};
-
-    const escapeHtml = (str) => {{
-        return String(str ?? "").replace(/[&<>"']/g, (ch) => {{
-            const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }};
-            return map[ch] ?? ch;
-        }});
-    }};
-
-    const initMap = () => {{
-        const el = document.getElementById(containerId);
-        if (!el) {{
-            console.error('❌ 找不到地圖容器元素:', containerId);
-            return;
-        }}
-        if (!window.google || !window.google.maps) {{
-            console.error('❌ Google Maps API 未載入');
-            return;
-        }}
-        
-        console.log('🎨 開始繪製地圖...');
-        
-        try {{
-            const map = new google.maps.Map(el, {{
-                zoom: markers.length > 1 ? 13 : 15,
-                center,
-                mapTypeControl: false,
-                streetViewControl: false,
-                fullscreenControl: true
-            }});
-            
-            console.log('✅ 地圖物件建立成功，準備放置標記...');
-
-            let validMarkerCount = 0;
-            markers.forEach((marker, idx) => {{
-                if (!marker) return;
-                const lat = Number(marker.lat);
-                const lng = Number(marker.lng);
-                if (!isFinite(lat) || !isFinite(lng)) {{
-                    console.warn(`⚠️ 標記 ${{idx}} 座標無效:`, marker);
-                    return;
-                }}
-
-                const gmMarker = new google.maps.Marker({{
-                    position: {{ lat, lng }},
-                    map,
-                    title: marker.title || ""
-                }});
-                
-                validMarkerCount++;
-
-                const infoLines = [];
-                if (marker.address) infoLines.push(escapeHtml(marker.address));
-                if (marker.distance_m !== undefined && marker.distance_m !== null) {{
-                    const distanceValue = Number(marker.distance_m);
-                    if (isFinite(distanceValue)) {{
-                        infoLines.push(`距離：約 ${{distanceValue.toFixed(0)}} 公尺`);
-                    }}
-                }}
-                if (Array.isArray(marker.items) && marker.items.length) {{
-                    const itemsText = marker.items.map((item) => escapeHtml(item)).join("、");
-                    infoLines.push(`即期品：${{itemsText}}`);
-                }}
-
-                if (infoLines.length) {{
-                    const infoWindow = new google.maps.InfoWindow({{
-                        content: `<div style="font-size: 14px; line-height: 1.5;">${{infoLines.join("<br>")}}</div>`
-                    }});
-                    gmMarker.addListener("click", () => infoWindow.open({{ anchor: gmMarker, map, shouldFocus: false }}));
-                }}
-            }});
-            
-            console.log(`✅ 地圖繪製完成！已放置 ${{validMarkerCount}} 個標記`);
-        }} catch (error) {{
-            console.error('❌ 地圖初始化錯誤:', error);
-        }}
-    }};
-
-    ensureScript()
-        .then(() => {{
-            const el = document.getElementById(containerId);
-            if (el) {{
-                initMap();
-            }} else {{
-                console.error('❌ 等待後仍找不到容器元素');
-            }}
-        }})
-        .catch((err) => {{
-            console.error('❌ Google Maps 載入失敗:', err);
-        }});
-}})();
-</script>
-""".format(
-        container_id=container_id,
-        center_json=center_json,
-        markers_json=markers_json,
-        api_key=GOOGLE_MAPS_API_KEY,
+    # 建立標記字串（最多顯示前 10 個門市）
+    marker_params = []
+    for idx, marker in enumerate(markers[:10]):
+        lat = _to_float(marker.get("lat"))
+        lng = _to_float(marker.get("lng"))
+        if lat is not None and lng is not None:
+            # 用不同顏色區分品牌
+            color = "red" if "7-11" in marker.get("title", "") else "blue"
+            label = str(idx + 1) if idx < 9 else ""
+            marker_params.append(f"color:{color}|label:{label}|{lat},{lng}")
+    
+    markers_str = "&".join([f"markers={m}" for m in marker_params])
+    
+    # Google Maps Static API URL
+    zoom = 14 if len(markers) > 1 else 15
+    map_url = (
+        f"https://maps.googleapis.com/maps/api/staticmap?"
+        f"center={center_lat},{center_lon}"
+        f"&zoom={zoom}"
+        f"&size=800x400"
+        f"&maptype=roadmap"
+        f"&{markers_str}"
+        f"&key={GOOGLE_MAPS_API_KEY}"
     )
+    
+    print(f"✅ 地圖 URL 生成完成，包含 {len(marker_params)} 個標記")
+    return map_url
 
-    return html
 
 def find_nearest_store(address, lat, lon, distance_km):
     """
@@ -532,8 +427,8 @@ def find_nearest_store(address, lat, lon, distance_km):
 
     markers.sort(key=lambda item: item.get("distance_m") if item.get("distance_m") is not None else float("inf"))
 
-    map_html = _generate_map_html(lat, lon, markers)
-    map_component = gr.update(value=map_html, visible=True) if map_html else hidden_map
+    map_url = _generate_map_url(lat, lon, markers)
+    map_component = gr.update(value=map_url, visible=True) if map_url else hidden_map
 
     return result_rows, lat, lon, map_component
 
@@ -565,7 +460,7 @@ def main():
         with gr.Row():
             auto_gps_search_button = gr.Button("📍🔍 自動定位並搜尋", elem_id="auto-gps-search-btn")
 
-        map_html = gr.HTML(value="", visible=False, elem_id="store-map-container")
+        map_image = gr.Image(label="門市地圖", visible=False, elem_id="store-map-container", show_label=True)
 
         output_table = gr.Dataframe(
             headers=["門市", "距離 (m)", "商品/即期食品", "數量"],
@@ -607,7 +502,7 @@ def main():
         auto_gps_search_button.click(
             fn=find_nearest_store,
             inputs=[address, lat, lon, distance_dropdown],
-            outputs=[output_table, lat, lon, map_html],
+            outputs=[output_table, lat, lon, map_image],
             js="""
             (address, lat, lon, distance) => {
                 function isZero(val) {
