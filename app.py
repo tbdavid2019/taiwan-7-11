@@ -614,37 +614,30 @@ def main():
                     return !val || Number(val) === 0;
                 }
 
-                const nullTable = null;
-                const nullMap = null;
-
                 if (address && address.trim() !== "") {
                     // 有填地址，直接查詢，不抓 GPS
-                    const currentLat = Number(lat);
-                    const currentLon = Number(lon);
-                    return [address, currentLat, currentLon, distance, nullTable, currentLat, currentLon, nullMap];
+                    return [address, Number(lat), Number(lon), distance];
                 }
                 if (!isZero(lat) && !isZero(lon)) {
                     // 沒填地址但有座標，直接查詢
-                    const currentLat = Number(lat);
-                    const currentLon = Number(lon);
-                    return [address, currentLat, currentLon, distance, nullTable, currentLat, currentLon, nullMap];
+                    return [address, Number(lat), Number(lon), distance];
                 }
                 // 沒填地址且沒座標，抓 GPS
                 return new Promise((resolve) => {
                     if (!navigator.geolocation) {
                         alert("您的瀏覽器不支援地理位置功能");
-                        resolve([address, 0, 0, distance, nullTable, 0, 0, nullMap]);
+                        resolve([address, 0, 0, distance]);
                         return;
                     }
                     navigator.geolocation.getCurrentPosition(
                         (position) => {
                             const newLat = position.coords.latitude;
                             const newLon = position.coords.longitude;
-                            resolve([address, newLat, newLon, distance, nullTable, newLat, newLon, nullMap]);
+                            resolve([address, newLat, newLon, distance]);
                         },
                         (error) => {
                             alert("無法取得位置：" + error.message);
-                            resolve([address, 0, 0, distance, nullTable, 0, 0, nullMap]);
+                            resolve([address, 0, 0, distance]);
                         }
                     );
                 });
