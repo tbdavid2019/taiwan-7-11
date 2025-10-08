@@ -184,6 +184,12 @@ def _generate_map_static(center_lat, center_lon, markers):
     
     # 建立標記字串
     marker_params = []
+    
+    # 首先加入用戶位置標記（綠色，圖標樣式）
+    user_marker = f"color:green|label:📍|{center_lat},{center_lon}"
+    marker_params.append(user_marker)
+    
+    # 然後加入門市標記
     for marker in markers[:10]:
         lat = _to_float(marker.get("lat"))
         lng = _to_float(marker.get("lng"))
@@ -212,6 +218,15 @@ def _generate_map_static(center_lat, center_lon, markers):
     
     # 生成門市編號對照表
     store_legend = []
+    
+    # 先加入用戶位置說明
+    store_legend.append(
+        f'<div style="margin: 4px 0; text-align: left; font-weight: 500; color: #2e7d32;">'
+        f'🟢 您的位置 ({center_lat:.4f}, {center_lon:.4f})'
+        f'</div>'
+    )
+    
+    # 然後加入門市列表
     for marker in markers[:10]:
         map_num = marker.get("map_number", "")
         title = marker.get("title", "門市")
@@ -424,6 +439,12 @@ def find_nearest_store(address, lat, lon, distance_km):
                         store_lon = store_lon or _get_first(detail_candidate, "StoreLng", "Longitude", "Lng")
                         store_addr = store_addr or _get_first(detail_candidate, "StoreAddress", "Address")
 
+                # Debug: 檢查座標是否取得
+                if store_lat is None or store_lon is None:
+                    print(f"⚠️ 7-11 {store_name} ({store_no}) 缺少座標: lat={store_lat}, lon={store_lon}")
+                else:
+                    print(f"✅ 7-11 {store_name} ({store_no}) 座標: ({store_lat}, {store_lon})")
+
                 marker_entry = update_marker(
                     "7-11",
                     store_no,
@@ -465,6 +486,7 @@ def find_nearest_store(address, lat, lon, distance_km):
                                 items=[item_desc],
                             )
                 else:
+                    # 即使沒有即期品，也要加入地圖標記
                     row = [
                         f"7-11 {store_name}",
                         f"{dist_m:.1f} m",
@@ -473,6 +495,14 @@ def find_nearest_store(address, lat, lon, distance_km):
                         dist_m,
                     ]
                     result_rows.append(row)
+                    # 確保沒有即期品的 7-11 也顯示在地圖上
+                    update_marker(
+                        "7-11",
+                        store_no,
+                        store_name,
+                        dist_m,
+                        items=["即期品 0 項"],
+                    )
     except Exception as e:
         print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
 
@@ -553,18 +583,26 @@ def find_nearest_store(address, lat, lon, distance_km):
 
     markers = []
     for entry in map_store_info.values():
-        if entry.get("lat") is None or entry.get("lng") is None:
+        title = entry.get("title")
+        lat = entry.get("lat")
+        lng = entry.get("lng")
+        
+        if lat is None or lng is None:
+            print(f"⚠️ 跳過無座標的門市: {title} (lat={lat}, lng={lng})")
             continue
+        
         markers.append(
             {
-                "title": entry.get("title"),
-                "lat": entry.get("lat"),
-                "lng": entry.get("lng"),
+                "title": title,
+                "lat": lat,
+                "lng": lng,
                 "distance_m": entry.get("distance_m"),
                 "address": entry.get("address"),
                 "items": entry.get("items", []),
             }
         )
+    
+    print(f"📍 總共加入 {len(markers)} 個門市到地圖標記")
 
     markers.sort(key=lambda item: item.get("distance_m") if item.get("distance_m") is not None else float("inf"))
 
@@ -650,7 +688,7 @@ def main():
             auto_gps_search_button = gr.Button("📍🔍 自動定位並搜尋", elem_id="auto-gps-search-btn")
 
         # 使用 HTML 組件支援 iframe，同時可以顯示靜態圖片或 Markdown
-        map_display = gr.HTML(label="門市地圖", visible=False, elem_id="store-map-container", show_label=True)
+        map_display = gr.HTML(label="門市地圖", visible=False, elem_id="store-map-container")
 
         output_table = gr.Dataframe(
             headers=["地圖編號", "門市", "距離 (m)", "商品/即期食品", "數量"],
