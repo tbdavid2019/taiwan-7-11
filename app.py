@@ -102,8 +102,15 @@ def _to_float(value):
 
 
 def _generate_map_html(center_lat, center_lon, markers):
-    if not GOOGLE_MAPS_API_KEY or not markers:
+    if not GOOGLE_MAPS_API_KEY:
+        print("⚠️ 警告：未設定 GOOGLE_MAPS_API_KEY，地圖無法顯示")
         return None
+    
+    if not markers:
+        print("⚠️ 警告：沒有門市標記資料")
+        return None
+
+    print(f"🗺️ 準備生成地圖：中心點 ({center_lat}, {center_lon})，門市數量：{len(markers)}")
 
     center_lat = _to_float(center_lat)
     center_lon = _to_float(center_lon)
@@ -118,28 +125,43 @@ def _generate_map_html(center_lat, center_lon, markers):
                 break
 
     if center_lat is None or center_lon is None:
+        print("❌ 錯誤：無法確定地圖中心點座標")
         return None
 
     container_id = f"store-map-{uuid.uuid4().hex}"
     markers_json = json.dumps(markers, ensure_ascii=False)
     center_json = json.dumps({"lat": center_lat, "lng": center_lon})
+    
+    # 隱藏 API key 前幾個字元用於 debug
+    api_key_preview = GOOGLE_MAPS_API_KEY[:10] + "..." if len(GOOGLE_MAPS_API_KEY) > 10 else "短金鑰"
+    print(f"✅ 使用 Google Maps API Key: {api_key_preview}")
 
     html = """
-<div id="{container_id}" style="width: 100%; min-height: 420px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"></div>
+<div id="{container_id}" style="width: 100%; min-height: 420px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); background: #f0f0f0;"></div>
 <script>
 (() => {{
     const containerId = "{container_id}";
     const center = {center_json};
     const markers = {markers_json};
+    
+    console.log('🗺️ 地圖初始化開始:', {{ containerId, center, markerCount: markers.length }});
 
     const ensureScript = () => {{
         if (!window.__googleMapsLoader) {{
-            window.__googleMapsLoader = new Promise((resolve) => {{
+            console.log('📦 載入 Google Maps API...');
+            window.__googleMapsLoader = new Promise((resolve, reject) => {{
                 const script = document.createElement('script');
                 script.src = "https://maps.googleapis.com/maps/api/js?key={api_key}";
                 script.async = true;
                 script.defer = true;
-                script.onload = resolve;
+                script.onload = () => {{
+                    console.log('✅ Google Maps API 載入成功');
+                    resolve();
+                }};
+                script.onerror = (err) => {{
+                    console.error('❌ Google Maps API 載入失敗:', err);
+                    reject(err);
+                }};
                 document.head.appendChild(script);
             }});
         }}
@@ -155,54 +177,85 @@ def _generate_map_html(center_lat, center_lon, markers):
 
     const initMap = () => {{
         const el = document.getElementById(containerId);
-        if (!el || !window.google || !window.google.maps) return;
-        const map = new google.maps.Map(el, {{
-            zoom: markers.length > 1 ? 13 : 15,
-            center,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: true
-        }});
-
-        markers.forEach((marker) => {{
-            if (!marker) return;
-            const lat = Number(marker.lat);
-            const lng = Number(marker.lng);
-            if (!isFinite(lat) || !isFinite(lng)) return;
-
-            const gmMarker = new google.maps.Marker({{
-                position: {{ lat, lng }},
-                map,
-                title: marker.title || ""
+        if (!el) {{
+            console.error('❌ 找不到地圖容器元素:', containerId);
+            return;
+        }}
+        if (!window.google || !window.google.maps) {{
+            console.error('❌ Google Maps API 未載入');
+            return;
+        }}
+        
+        console.log('🎨 開始繪製地圖...');
+        
+        try {{
+            const map = new google.maps.Map(el, {{
+                zoom: markers.length > 1 ? 13 : 15,
+                center,
+                mapTypeControl: false,
+                streetViewControl: false,
+                fullscreenControl: true
             }});
+            
+            console.log('✅ 地圖物件建立成功，準備放置標記...');
 
-            const infoLines = [];
-            if (marker.address) infoLines.push(escapeHtml(marker.address));
-            if (marker.distance_m !== undefined && marker.distance_m !== null) {{
-                const distanceValue = Number(marker.distance_m);
-                if (isFinite(distanceValue)) {{
-                    infoLines.push(`距離：約 ${{distanceValue.toFixed(0)}} 公尺`);
+            let validMarkerCount = 0;
+            markers.forEach((marker, idx) => {{
+                if (!marker) return;
+                const lat = Number(marker.lat);
+                const lng = Number(marker.lng);
+                if (!isFinite(lat) || !isFinite(lng)) {{
+                    console.warn(`⚠️ 標記 ${{idx}} 座標無效:`, marker);
+                    return;
                 }}
-            }}
-            if (Array.isArray(marker.items) && marker.items.length) {{
-                const itemsText = marker.items.map((item) => escapeHtml(item)).join("、");
-                infoLines.push(`即期品：${{itemsText}}`);
-            }}
 
-            if (infoLines.length) {{
-                const infoWindow = new google.maps.InfoWindow({{
-                    content: `<div style="font-size: 14px; line-height: 1.5;">${{infoLines.join("<br>")}}</div>`
+                const gmMarker = new google.maps.Marker({{
+                    position: {{ lat, lng }},
+                    map,
+                    title: marker.title || ""
                 }});
-                gmMarker.addListener("click", () => infoWindow.open({{ anchor: gmMarker, map, shouldFocus: false }}));
-            }}
-        }});
+                
+                validMarkerCount++;
+
+                const infoLines = [];
+                if (marker.address) infoLines.push(escapeHtml(marker.address));
+                if (marker.distance_m !== undefined && marker.distance_m !== null) {{
+                    const distanceValue = Number(marker.distance_m);
+                    if (isFinite(distanceValue)) {{
+                        infoLines.push(`距離：約 ${{distanceValue.toFixed(0)}} 公尺`);
+                    }}
+                }}
+                if (Array.isArray(marker.items) && marker.items.length) {{
+                    const itemsText = marker.items.map((item) => escapeHtml(item)).join("、");
+                    infoLines.push(`即期品：${{itemsText}}`);
+                }}
+
+                if (infoLines.length) {{
+                    const infoWindow = new google.maps.InfoWindow({{
+                        content: `<div style="font-size: 14px; line-height: 1.5;">${{infoLines.join("<br>")}}</div>`
+                    }});
+                    gmMarker.addListener("click", () => infoWindow.open({{ anchor: gmMarker, map, shouldFocus: false }}));
+                }}
+            }});
+            
+            console.log(`✅ 地圖繪製完成！已放置 ${{validMarkerCount}} 個標記`);
+        }} catch (error) {{
+            console.error('❌ 地圖初始化錯誤:', error);
+        }}
     }};
 
-    ensureScript().then(() => {{
-        if (document.getElementById(containerId)) {{
-            initMap();
-        }}
-    }});
+    ensureScript()
+        .then(() => {{
+            const el = document.getElementById(containerId);
+            if (el) {{
+                initMap();
+            }} else {{
+                console.error('❌ 等待後仍找不到容器元素');
+            }}
+        }})
+        .catch((err) => {{
+            console.error('❌ Google Maps 載入失敗:', err);
+        }});
 }})();
 </script>
 """.format(
