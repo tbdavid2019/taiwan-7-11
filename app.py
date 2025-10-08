@@ -594,36 +594,28 @@ def find_nearest_store(address, lat, lon, distance_km):
         # 在最前面插入地圖編號
         row.insert(0, str(matched_number) if matched_number else "-")
 
-    # 優先嘗試 HTML iframe 方式（不需要 API key）
-    try:
-        map_display = _generate_map_html(lat, lon, markers)
-        if map_display:
-            print("✅ 使用方案1: HTML iframe 地圖")
-            map_component = gr.update(value=map_display, visible=True)
-            return result_rows, lat, lon, map_component
-    except Exception as e:
-        print(f"⚠️ 方案1失敗: {e}")
-    
-    # 備用方案：使用靜態圖片（需要 API key）
+    # 主要方案：使用靜態圖片（需要 API key）
     try:
         if GOOGLE_MAPS_API_KEY:
-            map_url = _generate_map_static(lat, lon, markers)
-            if map_url:
-                print("✅ 使用方案2: Static API 靜態圖片")
-                map_component = gr.update(value=map_url, visible=True)
+            map_display = _generate_map_static(lat, lon, markers)
+            if map_display:
+                print("✅ 使用靜態地圖顯示")
+                map_component = gr.update(value=map_display, visible=True)
                 return result_rows, lat, lon, map_component
+        else:
+            print("⚠️ 未設定 GOOGLE_MAPS_API_KEY")
     except Exception as e:
-        print(f"⚠️ 方案2失敗: {e}")
+        print(f"⚠️ 靜態地圖生成失敗: {e}")
     
-    # 最終備用方案：使用 Markdown 連結（無需 API key）
+    # 備用方案：使用 Markdown 連結（無需 API key）
     try:
         map_markdown = _generate_map_markdown(lat, lon, markers)
         if map_markdown:
-            print("✅ 使用方案3: Markdown 文字連結")
+            print("✅ 使用 Markdown 文字連結（備用方案）")
             map_component = gr.update(value=map_markdown, visible=True)
             return result_rows, lat, lon, map_component
     except Exception as e:
-        print(f"⚠️ 方案3失敗: {e}")
+        print(f"⚠️ Markdown 方案失敗: {e}")
     
     # 所有方案都失敗，隱藏地圖但不影響主要功能
     print("ℹ️ 地圖功能暫時無法使用，但門市搜尋功能正常")
