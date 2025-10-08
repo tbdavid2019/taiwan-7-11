@@ -83,136 +83,136 @@ def get_family_nearby_stores(lat, lon):
 
 
 def _get_first(mapping, *keys):
-        for key in keys:
-                if not isinstance(mapping, dict):
-                        continue
-                value = mapping.get(key)
-                if value not in (None, ""):
-                        return value
-        return None
+    for key in keys:
+        if not isinstance(mapping, dict):
+            continue
+        value = mapping.get(key)
+        if value not in (None, ""):
+            return value
+    return None
 
 
 def _to_float(value):
-        try:
-                if value in (None, ""):
-                        return None
-                return float(value)
-        except (TypeError, ValueError):
-                return None
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _generate_map_html(center_lat, center_lon, markers):
-        if not GOOGLE_MAPS_API_KEY or not markers:
-                return None
+    if not GOOGLE_MAPS_API_KEY or not markers:
+        return None
 
-        center_lat = _to_float(center_lat)
-        center_lon = _to_float(center_lon)
+    center_lat = _to_float(center_lat)
+    center_lon = _to_float(center_lon)
 
-        if center_lat is None or center_lon is None:
-                for marker in markers:
-                        lat_candidate = _to_float(marker.get("lat"))
-                        lon_candidate = _to_float(marker.get("lng"))
-                        if lat_candidate is not None and lon_candidate is not None:
-                                center_lat = lat_candidate
-                                center_lon = lon_candidate
-                                break
+    if center_lat is None or center_lon is None:
+        for marker in markers:
+            lat_candidate = _to_float(marker.get("lat"))
+            lon_candidate = _to_float(marker.get("lng"))
+            if lat_candidate is not None and lon_candidate is not None:
+                center_lat = lat_candidate
+                center_lon = lon_candidate
+                break
 
-        if center_lat is None or center_lon is None:
-                return None
+    if center_lat is None or center_lon is None:
+        return None
 
-            container_id = f"store-map-{uuid.uuid4().hex}"
-            markers_json = json.dumps(markers, ensure_ascii=False)
-            center_json = json.dumps({"lat": center_lat, "lng": center_lon})
+    container_id = f"store-map-{uuid.uuid4().hex}"
+    markers_json = json.dumps(markers, ensure_ascii=False)
+    center_json = json.dumps({"lat": center_lat, "lng": center_lon})
 
-            html = """
-    <div id="{container_id}" style="width: 100%; min-height: 420px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"></div>
-    <script>
-    (() => {{
-        const containerId = "{container_id}";
-        const center = {center_json};
-        const markers = {markers_json};
+    html = """
+<div id="{container_id}" style="width: 100%; min-height: 420px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"></div>
+<script>
+(() => {{
+    const containerId = "{container_id}";
+    const center = {center_json};
+    const markers = {markers_json};
 
-        const ensureScript = () => {{
-            if (!window.__googleMapsLoader) {{
-                window.__googleMapsLoader = new Promise((resolve) => {{
-                    const script = document.createElement('script');
-                    script.src = "https://maps.googleapis.com/maps/api/js?key={api_key}";
-                    script.async = true;
-                    script.defer = true;
-                    script.onload = resolve;
-                    document.head.appendChild(script);
-                }});
+    const ensureScript = () => {{
+        if (!window.__googleMapsLoader) {{
+            window.__googleMapsLoader = new Promise((resolve) => {{
+                const script = document.createElement('script');
+                script.src = "https://maps.googleapis.com/maps/api/js?key={api_key}";
+                script.async = true;
+                script.defer = true;
+                script.onload = resolve;
+                document.head.appendChild(script);
+            }});
+        }}
+        return window.__googleMapsLoader;
+    }};
+
+    const escapeHtml = (str) => {{
+        return String(str ?? "").replace(/[&<>"']/g, (ch) => {{
+            const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }};
+            return map[ch] ?? ch;
+        }});
+    }};
+
+    const initMap = () => {{
+        const el = document.getElementById(containerId);
+        if (!el || !window.google || !window.google.maps) return;
+        const map = new google.maps.Map(el, {{
+            zoom: markers.length > 1 ? 13 : 15,
+            center,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: true
+        }});
+
+        markers.forEach((marker) => {{
+            if (!marker) return;
+            const lat = Number(marker.lat);
+            const lng = Number(marker.lng);
+            if (!isFinite(lat) || !isFinite(lng)) return;
+
+            const gmMarker = new google.maps.Marker({{
+                position: {{ lat, lng }},
+                map,
+                title: marker.title || ""
+            }});
+
+            const infoLines = [];
+            if (marker.address) infoLines.push(escapeHtml(marker.address));
+            if (marker.distance_m !== undefined && marker.distance_m !== null) {{
+                const distanceValue = Number(marker.distance_m);
+                if (isFinite(distanceValue)) {{
+                    infoLines.push(`距離：約 ${{distanceValue.toFixed(0)}} 公尺`);
+                }}
             }}
-            return window.__googleMapsLoader;
-        }};
+            if (Array.isArray(marker.items) && marker.items.length) {{
+                const itemsText = marker.items.map((item) => escapeHtml(item)).join("、");
+                infoLines.push(`即期品：${{itemsText}}`);
+            }}
 
-        const escapeHtml = (str) => {{
-            return String(str ?? "").replace(/[&<>"']/g, (ch) => {{
-                const map = {{ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }};
-                return map[ch] ?? ch;
-            }});
-        }};
-
-        const initMap = () => {{
-            const el = document.getElementById(containerId);
-            if (!el || !window.google || !window.google.maps) return;
-            const map = new google.maps.Map(el, {{
-                zoom: markers.length > 1 ? 13 : 15,
-                center,
-                mapTypeControl: false,
-                streetViewControl: false,
-                fullscreenControl: true
-            }});
-
-            markers.forEach((marker) => {{
-                if (!marker) return;
-                const lat = Number(marker.lat);
-                const lng = Number(marker.lng);
-                if (!isFinite(lat) || !isFinite(lng)) return;
-
-                const gmMarker = new google.maps.Marker({{
-                    position: {{ lat, lng }},
-                    map,
-                    title: marker.title || ""
+            if (infoLines.length) {{
+                const infoWindow = new google.maps.InfoWindow({{
+                    content: `<div style="font-size: 14px; line-height: 1.5;">${{infoLines.join("<br>")}}</div>`
                 }});
-
-                const infoLines = [];
-                if (marker.address) infoLines.push(escapeHtml(marker.address));
-                if (marker.distance_m !== undefined && marker.distance_m !== null) {{
-                    const distanceValue = Number(marker.distance_m);
-                    if (isFinite(distanceValue)) {{
-                        infoLines.push(`距離：約 ${{distanceValue.toFixed(0)}} 公尺`);
-                    }}
-                }}
-                if (Array.isArray(marker.items) && marker.items.length) {{
-                    const itemsText = marker.items.map((item) => escapeHtml(item)).join("、");
-                    infoLines.push(`即期品：${{itemsText}}`);
-                }}
-
-                if (infoLines.length) {{
-                    const infoWindow = new google.maps.InfoWindow({{
-                        content: `<div style="font-size: 14px; line-height: 1.5;">${{infoLines.join("<br>")}}</div>`
-                    }});
-                    gmMarker.addListener("click", () => infoWindow.open({{ anchor: gmMarker, map, shouldFocus: false }}));
-                }}
-            }});
-        }};
-
-        ensureScript().then(() => {{
-            if (document.getElementById(containerId)) {{
-                initMap();
+                gmMarker.addListener("click", () => infoWindow.open({{ anchor: gmMarker, map, shouldFocus: false }}));
             }}
         }});
-    }})();
-    </script>
-    """.format(
-                    container_id=container_id,
-                    center_json=center_json,
-                    markers_json=markers_json,
-                    api_key=GOOGLE_MAPS_API_KEY,
-            )
+    }};
 
-            return html
+    ensureScript().then(() => {{
+        if (document.getElementById(containerId)) {{
+            initMap();
+        }}
+    }});
+}})();
+</script>
+""".format(
+        container_id=container_id,
+        center_json=center_json,
+        markers_json=markers_json,
+        api_key=GOOGLE_MAPS_API_KEY,
+    )
+
+    return html
 
 def find_nearest_store(address, lat, lon, distance_km):
     """
