@@ -404,6 +404,13 @@ def find_nearest_store(address, lat, lon, distance_km):
     try:
         token_711 = get_7_11_token()
         nearby_stores_711 = get_7_11_nearby_stores(token_711, lat, lon)
+        
+        # Debug: 檢查第一個門市的完整資料結構
+        if nearby_stores_711 and len(nearby_stores_711) > 0:
+            import json
+            print(f"🔍 7-11 API 第一個門市的完整資料：")
+            print(json.dumps(nearby_stores_711[0], ensure_ascii=False, indent=2))
+        
         for store in nearby_stores_711:
             dist_m = _to_float(_get_first(store, "Distance", "distance"))
             if dist_m is None:
