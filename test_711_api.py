@@ -25,9 +25,8 @@ if resp.status_code == 200 and resp.text:
             print("\n=== 測試取得附近門市 ===")
             nearby_url = f"{API_BASE}/Search/FrontendStoreItemStock/GetNearbyStoreList?token={token}"
             payload = {
-                "Latitude": 25.0330,
-                "Longitude": 121.5654,
-                "Distance": 3
+                "CurrentLocation": {"Latitude": 25.0330, "Longitude": 121.5654},
+                "SearchLocation": {"Latitude": 25.0330, "Longitude": 121.5654}
             }
             resp2 = requests.post(
                 nearby_url, 
@@ -40,12 +39,36 @@ if resp.status_code == 200 and resp.text:
             if resp2.status_code == 200:
                 js2 = resp2.json()
                 print(f"isSuccess: {js2.get('isSuccess')}")
-                stores = js2.get('element', [])
-                print(f"門市數量: {len(stores)}")
+                element = js2.get('element', {})
+                print(f"\n=== element 的類型和內容 ===")
+                print(f"Type: {type(element)}")
+                print(json.dumps(element, indent=2, ensure_ascii=False)[:2000])
                 
-                if stores:
-                    print("\n=== 第一個門市的完整資料 ===")
-                    print(json.dumps(stores[0], indent=2, ensure_ascii=False))
+                # 測試取得門市詳細資料
+                store_list = element.get('StoreStockItemList', [])
+                if store_list:
+                    first_store = store_list[0]
+                    store_no = first_store.get('StoreNo')
+                    print(f"\n=== 測試取得門市詳細資料 (StoreNo: {store_no}) ===")
+                    
+                    detail_url = f"{API_BASE}/Search/FrontendStoreItemStock/GetStoreDetail?token={token}"
+                    detail_payload = {
+                        "CurrentLocation": {"Latitude": 25.0330, "Longitude": 121.5654},
+                        "StoreNo": store_no
+                    }
+                    resp3 = requests.post(
+                        detail_url,
+                        headers={"user-agent": USER_AGENT, "content-type": "application/json"},
+                        json=detail_payload,
+                        timeout=10
+                    )
+                    print(f"Status Code: {resp3.status_code}")
+                    if resp3.status_code == 200:
+                        js3 = resp3.json()
+                        print(f"isSuccess: {js3.get('isSuccess')}")
+                        detail_data = js3.get('element', {})
+                        print("\n=== 門市詳細資料 ===")
+                        print(json.dumps(detail_data, indent=2, ensure_ascii=False))
         else:
             print(f"API 回應失敗: {js}")
     except Exception as e:

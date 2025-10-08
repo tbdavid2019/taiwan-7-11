@@ -163,6 +163,7 @@ def _generate_map_static(center_lat, center_lon, markers):
         return None
     
     if not markers:
+        print("⚠️ [方案2: 靜態圖] 沒有可顯示的門市標記")
         return None
 
     print(f"🗺️ [方案2: 靜態圖] 準備生成靜態地圖：中心點 ({center_lat}, {center_lon})，門市數量：{len(markers)}")
@@ -240,6 +241,13 @@ def _generate_map_static(center_lat, center_lon, markers):
     
     legend_html = "".join(store_legend)
     
+    # 統計說明
+    seven_count = sum(1 for m in markers if "7-11" in m.get("title", ""))
+    family_count = sum(1 for m in markers if "全家" in m.get("title", ""))
+    note_html = ""
+    if seven_count == 0 and family_count > 0:
+        note_html = '<div style="margin-top: 12px; padding: 8px; background: #fff3cd; border-radius: 6px; color: #856404; font-size: 12px;">ℹ️ 註：7-11 門市因 API 限制無法提供座標，故不顯示在地圖上，但距離資訊仍然正確</div>'
+    
     html = f"""
 <div style="width: 100%; max-width: 900px; margin: 0 auto;">
     <div style="width: 100%; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-bottom: 16px;">
@@ -257,6 +265,7 @@ def _generate_map_static(center_lat, center_lon, markers):
         <div style="font-weight: bold; margin-bottom: 8px; color: #333;">📋 地圖標記對照：</div>
         {legend_html}
     </div>
+    {note_html}
 </div>
 """
     
@@ -267,7 +276,7 @@ def _generate_map_static(center_lat, center_lon, markers):
 def _generate_map_markdown(center_lat, center_lon, markers):
     """生成包含 Google Maps 連結的 Markdown（最終備用方案）"""
     if not markers:
-        print("⚠️ 警告：沒有門市標記資料")
+        print("⚠️ [方案3: Markdown] 沒有可顯示的門市標記")
         return None
 
     print(f"🗺️ [方案3: Markdown] 準備生成文字連結：中心點 ({center_lat}, {center_lon})，門市數量：{len(markers)}")
@@ -305,13 +314,20 @@ def _generate_map_markdown(center_lat, center_lon, markers):
     # 生成顯示所有門市的地圖連結
     all_markers_url = f"https://www.google.com/maps/search/?api=1&query={center_lat},{center_lon}"
     
+    # 統計說明
+    seven_count = sum(1 for m in markers if "7-11" in m.get("title", ""))
+    family_count = sum(1 for m in markers if "全家" in m.get("title", ""))
+    note_text = ""
+    if seven_count == 0 and family_count > 0:
+        note_text = "\n\n---\n\nℹ️ **註：7-11 門市因 API 限制無法提供座標，故不顯示在地圖上，但距離資訊仍然正確**"
+    
     markdown_text = f"""
-### 📍 找到 {len(markers)} 個門市
+### 📍 找到 {len(markers)} 個有座標的門市
 
 [🗺️ 在 Google Maps 查看完整地圖]({all_markers_url})
 
 #### 門市列表（點擊查看位置）：
-{chr(10).join(store_list[:10])}
+{chr(10).join(store_list[:10])}{note_text}
 """
     
     print(f"✅ [方案3: Markdown] 地圖連結生成完成，包含 {len(store_list)} 個門市")
@@ -405,12 +421,6 @@ def find_nearest_store(address, lat, lon, distance_km):
         token_711 = get_7_11_token()
         nearby_stores_711 = get_7_11_nearby_stores(token_711, lat, lon)
         
-        # Debug: 檢查第一個門市的完整資料結構
-        if nearby_stores_711 and len(nearby_stores_711) > 0:
-            import json
-            print(f"🔍 7-11 API 第一個門市的完整資料：")
-            print(json.dumps(nearby_stores_711[0], ensure_ascii=False, indent=2))
-        
         for store in nearby_stores_711:
             dist_m = _to_float(_get_first(store, "Distance", "distance"))
             if dist_m is None:
@@ -445,12 +455,6 @@ def find_nearest_store(address, lat, lon, distance_km):
                         store_lat = store_lat or _get_first(detail_candidate, "StoreLat", "Latitude", "Lat")
                         store_lon = store_lon or _get_first(detail_candidate, "StoreLng", "Longitude", "Lng")
                         store_addr = store_addr or _get_first(detail_candidate, "StoreAddress", "Address")
-
-                # Debug: 檢查座標是否取得
-                if store_lat is None or store_lon is None:
-                    print(f"⚠️ 7-11 {store_name} ({store_no}) 缺少座標: lat={store_lat}, lon={store_lon}")
-                else:
-                    print(f"✅ 7-11 {store_name} ({store_no}) 座標: ({store_lat}, {store_lon})")
 
                 marker_entry = update_marker(
                     "7-11",
@@ -589,12 +593,16 @@ def find_nearest_store(address, lat, lon, distance_km):
         row.pop()
 
     markers = []
+    total_stores = len(map_store_info)
+    stores_without_coords = 0
+    
     for entry in map_store_info.values():
         title = entry.get("title")
         lat = entry.get("lat")
         lng = entry.get("lng")
         
         if lat is None or lng is None:
+            stores_without_coords += 1
             print(f"⚠️ 跳過無座標的門市: {title} (lat={lat}, lng={lng})")
             continue
         
@@ -609,7 +617,7 @@ def find_nearest_store(address, lat, lon, distance_km):
             }
         )
     
-    print(f"📍 總共加入 {len(markers)} 個門市到地圖標記")
+    print(f"📍 總共 {total_stores} 個門市，其中 {len(markers)} 個有座標可在地圖上顯示，{stores_without_coords} 個無座標（7-11 API 限制）")
 
     markers.sort(key=lambda item: item.get("distance_m") if item.get("distance_m") is not None else float("inf"))
 
@@ -676,7 +684,8 @@ def main():
         gr.Markdown("""
         1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
         2. 也可手動輸入地址、緯度、經度與搜尋範圍後再按此按鈕
-        3. 意見反應 telegram @a7a8a9abc
+        3. **註：7-11 門市因 API 限制無法提供座標，地圖上僅顯示全家門市，但距離與即期品資訊皆正確**
+        4. 意見反應 telegram @a7a8a9abc
         """)
 
         address = gr.Textbox(label="地址(可留空)", placeholder="可留空白,通常不用填")
