@@ -207,7 +207,10 @@ def find_nearest_store(address, lat, lon, distance_km):
 import gradio as gr
 
 def main():
-    with gr.Blocks() as demo:
+    with gr.Blocks(
+        title="便利商店即期食品查詢",
+        favicon_path="assets/favicon.svg",
+    ) as demo:
         gr.Markdown("## 台灣7-11 和 family全家便利商店「即期食品」 乞丐時光搜尋")
         gr.Markdown("""
         1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
