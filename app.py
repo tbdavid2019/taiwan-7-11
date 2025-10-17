@@ -209,7 +209,6 @@ import gradio as gr
 def main():
     with gr.Blocks(
         title="便利商店即期食品查詢",
-        favicon_path="assets/favicon.svg",
     ) as demo:
         gr.Markdown("## 台灣7-11 和 family全家便利商店「即期食品」 乞丐時光搜尋")
         gr.Markdown("""
@@ -310,7 +309,12 @@ def main():
             """
         )
 
-        demo.launch(server_name="0.0.0.0", server_port=7860, debug=True)
+        demo.launch(
+            server_name="0.0.0.0",
+            server_port=7860,
+            debug=True,
+            favicon_path="assets/favicon.svg",
+        )
 
 if __name__ == "__main__":
     main()
