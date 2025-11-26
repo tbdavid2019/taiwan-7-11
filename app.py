@@ -295,12 +295,12 @@ def main():
             }
             #primary-search-btn button {
                 background: linear-gradient(135deg, #ff8a50, #ff7043);
-                color: #fff;
+                color: #fff !important;
                 font-weight: 800;
-                padding: 15px 22px;
-                font-size: 17px;
-                border: none;
-                border-radius: 12px;
+                padding: 15px 22px !important;
+                font-size: 17px !important;
+                border: none !important;
+                border-radius: 12px !important;
                 letter-spacing: 0.2px;
                 box-shadow: 0 10px 28px -10px rgba(0,0,0,0.35);
                 transition: transform 0.1s ease, box-shadow 0.2s ease, filter 0.2s ease;
@@ -336,7 +336,7 @@ def main():
         gr.Markdown("""
         1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
         2. 也可手動輸入地址、緯度、經度與搜尋範圍後再按此按鈕
-        3. 意見反應 telegram @a7a8a9abc
+        3. 意見反應 https://bento.me/david888 
         """)
 
         with gr.Row():
@@ -459,7 +459,8 @@ def main():
                     ];
                 };
                 if (mode === "用地址" && address && address.trim() !== "") {
-                    return finalize(Number(lat) || 0, Number(lon) || 0);
+                    // 地址模式：直接交給後端 geocode，避免誤用上一筆座標
+                    return finalize(0, 0);
                 }
                 const hasCoords = (Number(lat) || 0) !== 0 && (Number(lon) || 0) !== 0;
                 if (hasCoords) {
@@ -484,6 +485,14 @@ def main():
             }
             """
         )
+
+        # 篩選器變動時即時重新查詢（沿用當前欄位值）
+        for ctrl in (store_filter, only_under_1km, only_in_stock, distance_slider):
+            ctrl.change(
+                fn=find_nearest_store,
+                inputs=[address, lat, lon, distance_slider, store_filter, only_under_1km, only_in_stock, input_mode],
+                outputs=[summary_html, results_html, lat, lon],
+            )
 
         demo.launch(
             server_name="0.0.0.0",
