@@ -290,20 +290,23 @@ def main():
             """
             <style>
             :root {
-                --primary: #f55c23;
-                --primary-weak: #ffe2d5;
+                --primary: #ff7043;
+                --primary-weak: #ffe6dc;
             }
             #primary-search-btn button {
-                background: var(--primary);
+                background: linear-gradient(135deg, #ff8a50, #ff7043);
                 color: #fff;
-                font-weight: 700;
-                padding: 14px 18px;
-                font-size: 16px;
+                font-weight: 800;
+                padding: 15px 22px;
+                font-size: 17px;
                 border: none;
-                box-shadow: 0 6px 20px -6px rgba(0,0,0,0.25);
+                border-radius: 12px;
+                letter-spacing: 0.2px;
+                box-shadow: 0 10px 28px -10px rgba(0,0,0,0.35);
+                transition: transform 0.1s ease, box-shadow 0.2s ease, filter 0.2s ease;
             }
-            #primary-search-btn button:hover { background: #e4521a; }
-            #primary-search-btn button:active { transform: translateY(1px); }
+            #primary-search-btn button:hover { filter: brightness(1.05); box-shadow: 0 12px 30px -10px rgba(0,0,0,0.35); }
+            #primary-search-btn button:active { transform: translateY(1px) scale(0.995); }
             .summary-bar {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -426,7 +429,7 @@ def main():
             inputs=[address, lat, lon, distance_slider, store_filter, only_under_1km, only_in_stock, input_mode],
             outputs=[summary_html, results_html, lat, lon],
             js="""
-            (mode, address, lat, lon, distance, storeFilter, under1k, onlyStock) => {
+            (address, lat, lon, distance, storeFilter, under1k, onlyStock, mode) => {
                 const distanceVal = Number(distance) || 0;
                 const savePrefs = (addr, la, lo, dist) => {
                     localStorage.setItem('mode', mode);
@@ -440,7 +443,20 @@ def main():
                 };
                 const finalize = (newLat, newLon) => {
                     savePrefs(address, newLat, newLon, distanceVal);
-                    return [mode, address, newLat, newLon, distanceVal, storeFilter, under1k, onlyStock, null, null, newLat, newLon];
+                    return [
+                        address,
+                        newLat,
+                        newLon,
+                        distanceVal,
+                        storeFilter,
+                        under1k,
+                        onlyStock,
+                        mode,
+                        null,
+                        null,
+                        newLat,
+                        newLon,
+                    ];
                 };
                 if (mode === "用地址" && address && address.trim() !== "") {
                     return finalize(Number(lat) || 0, Number(lon) || 0);
