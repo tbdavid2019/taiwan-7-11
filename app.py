@@ -120,10 +120,10 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
 
     def categorize_item(name: str):
         if "麵" in name:
-            return "麵"
+            return ("麵", "🍜")
         if "飯" in name:
-            return "飯"
-        return ""
+            return ("飯", "🍚")
+        return ("", "")
 
     def build_store_label(store_type, store_name):
         safe_name = html.escape(store_name)
@@ -148,6 +148,7 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                         for item in cat.get("ItemList", []):
                             item_name = item.get("ItemName", "")
                             item_qty = item.get("RemainingQty", 0)
+                            tag, tag_icon = categorize_item(item_name)
                             results.append({
                                 "store_type": "7-11",
                                 "store_id": store_no,
@@ -155,7 +156,8 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                                 "distance_m": dist_m,
                                 "item_label": f"{cat_name} - {item_name}",
                                 "qty": item_qty,
-                                "tag": categorize_item(item_name),
+                                "tag": tag,
+                                "tag_icon": tag_icon,
                             })
                 else:
                     results.append({
@@ -166,6 +168,7 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                         "item_label": "即期品 0 項",
                         "qty": 0,
                         "tag": "",
+                        "tag_icon": "",
                     })
     except Exception as e:
         print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
@@ -194,6 +197,7 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                             qty = product.get("qty", 0)
                             if qty > 0:
                                 has_item = True
+                                tag, tag_icon = categorize_item(product_name)
                                 results.append({
                                     "store_type": "全家",
                                     "store_id": store_id,
@@ -201,7 +205,8 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                                     "distance_m": dist_m,
                                     "item_label": f"{big_cat_name} - {subcat_name} - {product_name}",
                                     "qty": qty,
-                                    "tag": categorize_item(product_name),
+                                    "tag": tag,
+                                    "tag_icon": tag_icon,
                                 })
                 if not has_item:
                     results.append({
@@ -212,6 +217,7 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                         "item_label": "即期品 0 項",
                         "qty": 0,
                         "tag": "",
+                        "tag_icon": "",
                     })
     except Exception as e:
         print(f"❌ 取得全家 即期品時發生錯誤: {e}")
@@ -250,12 +256,13 @@ def _render_error(msg: str):
 def _render_summary(store_count: int, total_qty: int, min_distance: Optional[float], rows):
     nearest = f"{min_distance:.1f} m" if min_distance is not None else "—"
     tag_counts = {"麵": 0, "飯": 0}
+    tag_icons = {"麵": "🍜", "飯": "🍚"}
     for r in rows:
         tag = r.get("tag") or ""
         if tag in tag_counts:
             tag_counts[tag] += 1
     tags_html = "".join(
-        f"<span class='tag-chip tag-{k}'>{k} {v}</span>"
+        f"<span class='tag-chip tag-{k}'>{tag_icons.get(k, '')} {k} {v}</span>"
         for k, v in tag_counts.items()
         if v > 0
     )
@@ -277,12 +284,17 @@ def _render_table(rows):
             tag_class = "cat-noodle"
         elif r.get("tag") == "飯":
             tag_class = "cat-rice"
+        tag_icon = r.get("tag_icon") or ""
+        tag_html = ""
+        if r.get("tag"):
+            tag_html = f"<span class='tag-pill tag-{r['tag']}'>{tag_icon} {r['tag']}</span>"
+        item_cell = f"{tag_html}{html.escape(r['item_label'])}"
         body_html.append(
             f"""
             <tr class='{qty_class} {tag_class}'>
                 <td>{r["store_label"]}</td>
                 <td>{r["distance_m"]:.1f} m</td>
-                <td>{html.escape(r["item_label"])}</td>
+                <td>{item_cell}</td>
                 <td class='qty-cell'>{r["qty"]}</td>
             </tr>
             """
@@ -320,20 +332,21 @@ def main():
                 --primary: #ff6b6b;
                 --primary-weak: #ffe0e0;
             }
-            #primary-search-btn button {
-                background: linear-gradient(135deg, #ff8a8a, #ff6b6b);
+            #primary-search-btn button,
+            #primary-search-btn button:where(*) {
+                background: linear-gradient(135deg, #ff9ca0, #ff6b6b) !important;
                 color: #fff !important;
-                font-weight: 800;
-                padding: 15px 22px !important;
+                font-weight: 800 !important;
+                padding: 16px 24px !important;
                 font-size: 17px !important;
                 border: none !important;
-                border-radius: 12px !important;
+                border-radius: 14px !important;
                 letter-spacing: 0.2px;
-                box-shadow: 0 10px 28px -10px rgba(0,0,0,0.35);
-                transition: transform 0.1s ease, box-shadow 0.2s ease, filter 0.2s ease;
+                box-shadow: 0 12px 28px -10px rgba(0,0,0,0.35) !important;
+                transition: transform 0.12s ease, box-shadow 0.2s ease, filter 0.2s ease;
             }
-            #primary-search-btn button:hover { filter: brightness(1.05); box-shadow: 0 12px 30px -10px rgba(0,0,0,0.35); }
-            #primary-search-btn button:active { transform: translateY(1px) scale(0.995); }
+            #primary-search-btn button:hover { filter: brightness(1.05); box-shadow: 0 14px 30px -10px rgba(0,0,0,0.38) !important; }
+            #primary-search-btn button:active { transform: translateY(1px) scale(0.992); }
             .summary-bar {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -361,6 +374,9 @@ def main():
             .tag-飯 { background: #fff1d6; color: #b46500; }
             .cat-noodle td { background: #fff5f7; }
             .cat-rice td { background: #fff9f0; }
+            .tag-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 8px; font-size: 12px; margin-right: 6px; }
+            .tag-pill.tag-麵 { background: #ffe2e8; color: #b0233e; }
+            .tag-pill.tag-飯 { background: #fff1d6; color: #b46500; }
             </style>
             """
         )
