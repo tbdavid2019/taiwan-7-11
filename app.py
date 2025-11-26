@@ -1,9 +1,8 @@
 import gradio as gr
 import requests
-import json
 import os
-import pandas as pd
-from geopy.distance import geodesic
+import html
+from typing import Optional
 
 # =============== 7-11 所需常數 ===============
 # 請確認此處的 MID_V 是否有效，若過期請更新
@@ -74,17 +73,22 @@ def get_family_nearby_stores(lat, lon):
         raise RuntimeError(f"取得全家門市資料失敗: {js}")
     return js["data"]
 
-def find_nearest_store(address, lat, lon, distance_km):
+def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_1km, only_in_stock, input_mode):
     """
-    distance_km: 從下拉選單取得的「公里」(字串)，例如 '3' or '5' ...
+    distance_km: 選擇的公里數
+    store_filter: '全部' / '只看 7-11' / '只看 全家'
+    only_under_1km: bool，是否只顯示 1km 以內
+    only_in_stock: bool，是否只顯示有庫存 > 0
+    input_mode: '用地址' / '用 GPS'
     """
-    print(f"🔍 收到查詢請求: address={address}, lat={lat}, lon={lon}, distance_km={distance_km}")
+    print(
+        f"🔍 收到查詢請求: mode={input_mode}, address={address}, lat={lat}, lon={lon}, "
+        f"distance_km={distance_km}, filter={store_filter}, <1km={only_under_1km}, onlyStock={only_in_stock}"
+    )
 
-    # 若有填地址但 lat/lon 為 0，嘗試用 Google Geocoding API
+    # 若有填地址且 lat/lon 為 0，嘗試用 Google Geocoding API
     if address and address.strip() != "" and (lat == 0 or lon == 0):
         try:
-            import requests
-            import os
             googlekey = os.environ.get("googlekey")
             if not googlekey:
                 raise RuntimeError("未設定 googlekey，請於 Huggingface Space Secrets 設定。")
@@ -103,18 +107,22 @@ def find_nearest_store(address, lat, lon, distance_km):
                 print(f"地址轉換成功: {address} => lat={lat}, lon={lon}")
             else:
                 print(f"❌ Google Geocoding 失敗: {data}")
-                return [["❌ 地址轉換失敗，請輸入正確地址", "", "", "", ""]], 0, 0
+                return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon
         except Exception as e:
             print(f"❌ Google Geocoding 失敗: {e}")
-            return [["❌ 地址轉換失敗，請輸入正確地址", "", "", "", ""]], 0, 0
+            return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon
 
     if lat == 0 or lon == 0:
-        return [["❌ 請輸入地址或提供 GPS 座標", "", "", "", ""]], lat, lon
+        return "", _render_error("❌ 請輸入地址或提供 GPS 座標"), lat, lon
 
-    # 將 km 轉成公尺
     max_distance = float(distance_km) * 1000
+    results = []
 
-    result_rows = []
+    def build_store_label(store_type, store_name):
+        safe_name = html.escape(store_name)
+        badge_class = "badge-711" if store_type == "7-11" else "badge-family"
+        badge_text = "7-11" if store_type == "7-11" else "全家"
+        return f"<span class='badge {badge_class}'>{badge_text}</span> {safe_name}"
 
     # ------------------ 7-11 ------------------
     try:
@@ -133,23 +141,23 @@ def find_nearest_store(address, lat, lon, distance_km):
                         for item in cat.get("ItemList", []):
                             item_name = item.get("ItemName", "")
                             item_qty = item.get("RemainingQty", 0)
-                            row = [
-                                f"7-11 {store_name}",
-                                f"{dist_m:.1f} m",
-                                f"{cat_name} - {item_name}",
-                                str(item_qty),
-                                dist_m  # 用來排序
-                            ]
-                            result_rows.append(row)
+                            results.append({
+                                "store_type": "7-11",
+                                "store_id": store_no,
+                                "store_label": build_store_label("7-11", store_name),
+                                "distance_m": dist_m,
+                                "item_label": f"{cat_name} - {item_name}",
+                                "qty": item_qty
+                            })
                 else:
-                    row = [
-                        f"7-11 {store_name}",
-                        f"{dist_m:.1f} m",
-                        "即期品 0 項",
-                        "0",
-                        dist_m
-                    ]
-                    result_rows.append(row)
+                    results.append({
+                        "store_type": "7-11",
+                        "store_id": store_no,
+                        "store_label": build_store_label("7-11", store_name),
+                        "distance_m": dist_m,
+                        "item_label": "即期品 0 項",
+                        "qty": 0
+                    })
     except Exception as e:
         print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
 
@@ -161,6 +169,12 @@ def find_nearest_store(address, lat, lon, distance_km):
             if dist_m <= max_distance:
                 store_name = store.get("name", "全家 未提供店名")
                 info_list = store.get("info", [])
+                store_id = (
+                    store.get("id")
+                    or store.get("storeid")
+                    or store.get("posCode")
+                    or store_name
+                )
                 has_item = False
                 for big_cat in info_list:
                     big_cat_name = big_cat.get("name", "")
@@ -171,36 +185,98 @@ def find_nearest_store(address, lat, lon, distance_km):
                             qty = product.get("qty", 0)
                             if qty > 0:
                                 has_item = True
-                                row = [
-                                    f"全家 {store_name}",
-                                    f"{dist_m:.1f} m",
-                                    f"{big_cat_name} - {subcat_name} - {product_name}",
-                                    str(qty),
-                                    dist_m
-                                ]
-                                result_rows.append(row)
+                                results.append({
+                                    "store_type": "全家",
+                                    "store_id": store_id,
+                                    "store_label": build_store_label("全家", store_name),
+                                    "distance_m": dist_m,
+                                    "item_label": f"{big_cat_name} - {subcat_name} - {product_name}",
+                                    "qty": qty
+                                })
                 if not has_item:
-                    row = [
-                        f"全家 {store_name}",
-                        f"{dist_m:.1f} m",
-                        "即期品 0 項",
-                        "0",
-                        dist_m
-                    ]
-                    result_rows.append(row)
+                    results.append({
+                        "store_type": "全家",
+                        "store_id": store_id,
+                        "store_label": build_store_label("全家", store_name),
+                        "distance_m": dist_m,
+                        "item_label": "即期品 0 項",
+                        "qty": 0
+                    })
     except Exception as e:
         print(f"❌ 取得全家 即期品時發生錯誤: {e}")
 
-    if not result_rows:
-        return [["❌ 附近沒有即期食品 (在所選公里範圍內)", "", "", "", ""]], lat, lon
+    if not results:
+        return "", _render_error("❌ 附近沒有即期食品 (在所選公里範圍內)"), lat, lon
 
-    # 排序：依照最後一欄 (float 距離) 做由小到大排序
-    result_rows.sort(key=lambda x: x[4])
-    # 移除最後一欄 (不顯示給前端)
-    for row in result_rows:
-        row.pop()
+    filtered = results
+    if store_filter == "只看 7-11":
+        filtered = [r for r in filtered if r["store_type"] == "7-11"]
+    elif store_filter == "只看 全家":
+        filtered = [r for r in filtered if r["store_type"] == "全家"]
 
-    return result_rows, lat, lon
+    if only_under_1km:
+        filtered = [r for r in filtered if r["distance_m"] <= 1000]
+    if only_in_stock:
+        filtered = [r for r in filtered if r["qty"] > 0]
+
+    filtered.sort(key=lambda x: x["distance_m"])
+
+    if not filtered:
+        return "", _render_error("❌ 沒有符合篩選條件的結果"), lat, lon
+
+    store_keys = {(r["store_type"], r["store_id"]) for r in filtered}
+    total_qty = sum(r["qty"] for r in filtered if r["qty"] > 0)
+    min_distance = min(r["distance_m"] for r in filtered) if filtered else None
+    summary_html = _render_summary(len(store_keys), total_qty, min_distance)
+    table_html = _render_table(filtered)
+
+    return summary_html, table_html, lat, lon
+
+def _render_error(msg: str):
+    safe_msg = html.escape(msg)
+    return f"<div class='callout callout-error'>{safe_msg}</div>"
+
+def _render_summary(store_count: int, total_qty: int, min_distance: Optional[float]):
+    nearest = f"{min_distance:.1f} m" if min_distance is not None else "—"
+    return f"""
+    <div class='summary-bar'>
+        <div><span class='summary-label'>門市</span><span class='summary-value'>{store_count}</span></div>
+        <div><span class='summary-label'>可售商品數</span><span class='summary-value'>{total_qty}</span></div>
+        <div><span class='summary-label'>最近距離</span><span class='summary-value'>{nearest}</span></div>
+    </div>
+    """
+
+def _render_table(rows):
+    body_html = []
+    for r in rows:
+        qty_class = "qty-zero" if r["qty"] <= 0 else ""
+        body_html.append(
+            f"""
+            <tr class='{qty_class}'>
+                <td>{r["store_label"]}</td>
+                <td>{r["distance_m"]:.1f} m</td>
+                <td>{html.escape(r["item_label"])}</td>
+                <td class='qty-cell'>{r["qty"]}</td>
+            </tr>
+            """
+        )
+    return f"""
+    <div class='table-wrap'>
+        <table class='results-table'>
+            <thead>
+                <tr>
+                    <th>門市</th>
+                    <th>距離 (m)</th>
+                    <th>商品 / 即期食品</th>
+                    <th>數量</th>
+                </tr>
+            </thead>
+            <tbody>
+                {''.join(body_html)}
+            </tbody>
+        </table>
+    </div>
+    """
 
 # ========== Gradio 介面 ==========
 
@@ -210,6 +286,49 @@ def main():
     with gr.Blocks(
         title="便利商店即期食品查詢",
     ) as demo:
+        gr.HTML(
+            """
+            <style>
+            :root {
+                --primary: #f55c23;
+                --primary-weak: #ffe2d5;
+            }
+            #primary-search-btn button {
+                background: var(--primary);
+                color: #fff;
+                font-weight: 700;
+                padding: 14px 18px;
+                font-size: 16px;
+                border: none;
+                box-shadow: 0 6px 20px -6px rgba(0,0,0,0.25);
+            }
+            #primary-search-btn button:hover { background: #e4521a; }
+            #primary-search-btn button:active { transform: translateY(1px); }
+            .summary-bar {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 12px;
+                padding: 12px 14px;
+                border: 1px solid #e5e5e5;
+                border-radius: 10px;
+                background: #fafafa;
+            }
+            .summary-label { display: block; color: #666; font-size: 12px; letter-spacing: 0.5px; }
+            .summary-value { font-size: 18px; font-weight: 700; color: #111; }
+            .table-wrap { max-height: 520px; overflow: auto; border: 1px solid #eee; border-radius: 10px; }
+            .results-table { width: 100%; border-collapse: collapse; }
+            .results-table thead th { position: sticky; top: 0; background: #f5f5f5; z-index: 1; padding: 8px 10px; text-align: left; }
+            .results-table td { padding: 8px 10px; border-top: 1px solid #f1f1f1; }
+            .results-table tbody tr:nth-child(even) { background: #fcfcfc; }
+            .badge { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: 12px; color: #111; margin-right: 6px; }
+            .badge-711 { background: #ffd9b0; }
+            .badge-family { background: #d2f5e3; }
+            .qty-zero { color: #888; }
+            .qty-cell { text-align: right; font-variant-numeric: tabular-nums; }
+            .callout { padding: 12px 14px; border-radius: 10px; border: 1px solid #f0b8b8; background: #fff3f3; color: #a12b2b; }
+            </style>
+            """
+        )
         gr.Markdown("## 台灣7-11 和 family全家便利商店「即期食品」 乞丐時光搜尋")
         gr.Markdown("""
         1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
@@ -217,91 +336,132 @@ def main():
         3. 意見反應 telegram @a7a8a9abc
         """)
 
-        address = gr.Textbox(label="地址(可留空)", placeholder="可留空白,通常不用填")
-        lat = gr.Number(label="GPS 緯度", value=0, elem_id="lat")
-        lon = gr.Number(label="GPS 經度", value=0, elem_id="lon")
+        with gr.Row():
+            auto_gps_search_button = gr.Button("📍🔍 自動定位並搜尋", elem_id="primary-search-btn")
 
-        # 下拉選單，提供可選距離 (公里)
-        distance_dropdown = gr.Dropdown(
-            label="搜尋範圍 (公里)",
-            choices=["3", "5", "7", "13", "21"],
-            value="3",        # 預設 3 公里
-            interactive=True
+        gr.Markdown("**輸入模式**：允許直接用 GPS（最快）或手動輸入地址 / 座標。")
+        input_mode = gr.Radio(
+            label="輸入方式",
+            choices=["用 GPS", "用地址"],
+            value="用 GPS",
+            interactive=True,
         )
 
         with gr.Row():
-            auto_gps_search_button = gr.Button("📍🔍 自動定位並搜尋", elem_id="auto-gps-search-btn")
+            with gr.Column(visible=False) as address_group:
+                address = gr.Textbox(
+                    label="地址 (可留空)",
+                    placeholder="建議直接用 GPS，不填也可查詢",
+                )
+            with gr.Column(visible=True) as gps_group:
+                lat = gr.Number(label="GPS 緯度", value=0, elem_id="lat")
+                lon = gr.Number(label="GPS 經度", value=0, elem_id="lon")
 
-        output_table = gr.Dataframe(
-            headers=["門市", "距離 (m)", "商品/即期食品", "數量"],
-            interactive=False
+        distance_slider = gr.Slider(
+            label="搜尋範圍 (公里)",
+            minimum=1,
+            maximum=21,
+            step=1,
+            value=3,
+            interactive=True,
         )
 
-        # 只保留自動定位並搜尋按鈕
+        with gr.Row():
+            store_filter = gr.Radio(
+                label="門市篩選",
+                choices=["全部", "只看 7-11", "只看 全家"],
+                value="全部",
+                interactive=True,
+            )
+            only_under_1km = gr.Checkbox(label="只看 1 公里內", value=False)
+            only_in_stock = gr.Checkbox(label="只顯示有庫存", value=True)
 
-        # (已移除 gps_button)
+        summary_html = gr.HTML("")
+        results_html = gr.HTML("")
 
-        # 新增自動定位並搜尋按鈕
-        # auto_gps_search_button.click(
-        #     fn=find_nearest_store,
-        #     inputs=[address, lat, lon, distance_dropdown],
-        #     outputs=output_table,
-        #     js="""
-        #     (address, lat, lon, distance) => {
-        #         return new Promise((resolve) => {
-        #             if (!navigator.geolocation) {
-        #                 alert("您的瀏覽器不支援地理位置功能");
-        #                 resolve([address, 0, 0, distance]);
-        #                 return;
-        #             }
-        #             navigator.geolocation.getCurrentPosition(
-        #                 (position) => {
-        #                     resolve([address, position.coords.latitude, position.coords.longitude, distance]);
-        #                 },
-        #                 (error) => {
-        #                     alert("無法取得位置：" + error.message);
-        #                     resolve([address, 0, 0, distance]);
-        #                 }
-        #             );
-        #         });
-        #     }
-        #     """
-        # )
+        def on_mode_change(mode):
+            return (
+                gr.update(visible=mode == "用地址"),
+                gr.update(visible=mode == "用 GPS"),
+            )
 
-        # 修正版：自動定位並搜尋，查詢同時回填 lat/lon 欄位，address 有填時不抓 GPS
+        input_mode.change(
+            fn=on_mode_change,
+            inputs=input_mode,
+            outputs=[address_group, gps_group],
+        )
+
+        demo.load(
+            fn=lambda: ("", 0, 0, 3, "全部", False, True, "用 GPS"),
+            outputs=[address, lat, lon, distance_slider, store_filter, only_under_1km, only_in_stock, input_mode],
+            js="""
+            () => {
+                const getNum = (key, fallback) => {
+                    const raw = localStorage.getItem(key);
+                    const n = raw === null ? fallback : Number(raw);
+                    return isNaN(n) ? fallback : n;
+                };
+                return [
+                    localStorage.getItem('addr') || '',
+                    getNum('lat', 0),
+                    getNum('lon', 0),
+                    getNum('radius', 3),
+                    localStorage.getItem('store_filter') || '全部',
+                    localStorage.getItem('lt1k') === 'true',
+                    localStorage.getItem('onlyStock') !== 'false',
+                    localStorage.getItem('mode') || '用 GPS',
+                ];
+            }
+            """,
+        )
+
+        demo.load(
+            fn=on_mode_change,
+            inputs=input_mode,
+            outputs=[address_group, gps_group],
+        )
+
         auto_gps_search_button.click(
             fn=find_nearest_store,
-            inputs=[address, lat, lon, distance_dropdown],
-            outputs=[output_table, lat, lon],
+            inputs=[address, lat, lon, distance_slider, store_filter, only_under_1km, only_in_stock, input_mode],
+            outputs=[summary_html, results_html, lat, lon],
             js="""
-            (address, lat, lon, distance) => {
-                function isZero(val) {
-                    return !val || Number(val) === 0;
+            (mode, address, lat, lon, distance, storeFilter, under1k, onlyStock) => {
+                const distanceVal = Number(distance) || 0;
+                const savePrefs = (addr, la, lo, dist) => {
+                    localStorage.setItem('mode', mode);
+                    localStorage.setItem('addr', addr || '');
+                    localStorage.setItem('lat', la || 0);
+                    localStorage.setItem('lon', lo || 0);
+                    localStorage.setItem('radius', dist || 3);
+                    localStorage.setItem('store_filter', storeFilter || '全部');
+                    localStorage.setItem('lt1k', under1k ? 'true' : 'false');
+                    localStorage.setItem('onlyStock', onlyStock ? 'true' : 'false');
+                };
+                const finalize = (newLat, newLon) => {
+                    savePrefs(address, newLat, newLon, distanceVal);
+                    return [mode, address, newLat, newLon, distanceVal, storeFilter, under1k, onlyStock, null, null, newLat, newLon];
+                };
+                if (mode === "用地址" && address && address.trim() !== "") {
+                    return finalize(Number(lat) || 0, Number(lon) || 0);
                 }
-                if (address && address.trim() !== "") {
-                    // 有填地址，直接查詢，不抓 GPS
-                    return [address, Number(lat), Number(lon), distance, Number(lat), Number(lon)];
+                const hasCoords = (Number(lat) || 0) !== 0 && (Number(lon) || 0) !== 0;
+                if (hasCoords) {
+                    return finalize(Number(lat) || 0, Number(lon) || 0);
                 }
-                if (!isZero(lat) && !isZero(lon)) {
-                    // 沒填地址但有座標，直接查詢
-                    return [address, Number(lat), Number(lon), distance, Number(lat), Number(lon)];
-                }
-                // 沒填地址且沒座標，抓 GPS
                 return new Promise((resolve) => {
                     if (!navigator.geolocation) {
                         alert("您的瀏覽器不支援地理位置功能");
-                        resolve([address, 0, 0, distance, 0, 0]);
+                        resolve(finalize(0, 0));
                         return;
                     }
                     navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            const newLat = position.coords.latitude;
-                            const newLon = position.coords.longitude;
-                            resolve([address, newLat, newLon, distance, newLat, newLon]);
+                        (pos) => {
+                            resolve(finalize(pos.coords.latitude, pos.coords.longitude));
                         },
                         (error) => {
                             alert("無法取得位置：" + error.message);
-                            resolve([address, 0, 0, distance, 0, 0]);
+                            resolve(finalize(0, 0));
                         }
                     );
                 });
