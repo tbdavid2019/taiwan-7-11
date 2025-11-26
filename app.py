@@ -118,6 +118,13 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
     max_distance = float(distance_km) * 1000
     results = []
 
+    def categorize_item(name: str):
+        if "麵" in name:
+            return "麵"
+        if "飯" in name:
+            return "飯"
+        return ""
+
     def build_store_label(store_type, store_name):
         safe_name = html.escape(store_name)
         badge_class = "badge-711" if store_type == "7-11" else "badge-family"
@@ -147,7 +154,8 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                                 "store_label": build_store_label("7-11", store_name),
                                 "distance_m": dist_m,
                                 "item_label": f"{cat_name} - {item_name}",
-                                "qty": item_qty
+                                "qty": item_qty,
+                                "tag": categorize_item(item_name),
                             })
                 else:
                     results.append({
@@ -156,7 +164,8 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                         "store_label": build_store_label("7-11", store_name),
                         "distance_m": dist_m,
                         "item_label": "即期品 0 項",
-                        "qty": 0
+                        "qty": 0,
+                        "tag": "",
                     })
     except Exception as e:
         print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
@@ -191,7 +200,8 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                                     "store_label": build_store_label("全家", store_name),
                                     "distance_m": dist_m,
                                     "item_label": f"{big_cat_name} - {subcat_name} - {product_name}",
-                                    "qty": qty
+                                    "qty": qty,
+                                    "tag": categorize_item(product_name),
                                 })
                 if not has_item:
                     results.append({
@@ -200,7 +210,8 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                         "store_label": build_store_label("全家", store_name),
                         "distance_m": dist_m,
                         "item_label": "即期品 0 項",
-                        "qty": 0
+                        "qty": 0,
+                        "tag": "",
                     })
     except Exception as e:
         print(f"❌ 取得全家 即期品時發生錯誤: {e}")
@@ -227,7 +238,7 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
     store_keys = {(r["store_type"], r["store_id"]) for r in filtered}
     total_qty = sum(r["qty"] for r in filtered if r["qty"] > 0)
     min_distance = min(r["distance_m"] for r in filtered) if filtered else None
-    summary_html = _render_summary(len(store_keys), total_qty, min_distance)
+    summary_html = _render_summary(len(store_keys), total_qty, min_distance, filtered)
     table_html = _render_table(filtered)
 
     return summary_html, table_html, lat, lon
@@ -236,13 +247,24 @@ def _render_error(msg: str):
     safe_msg = html.escape(msg)
     return f"<div class='callout callout-error'>{safe_msg}</div>"
 
-def _render_summary(store_count: int, total_qty: int, min_distance: Optional[float]):
+def _render_summary(store_count: int, total_qty: int, min_distance: Optional[float], rows):
     nearest = f"{min_distance:.1f} m" if min_distance is not None else "—"
+    tag_counts = {"麵": 0, "飯": 0}
+    for r in rows:
+        tag = r.get("tag") or ""
+        if tag in tag_counts:
+            tag_counts[tag] += 1
+    tags_html = "".join(
+        f"<span class='tag-chip tag-{k}'>{k} {v}</span>"
+        for k, v in tag_counts.items()
+        if v > 0
+    )
     return f"""
     <div class='summary-bar'>
         <div><span class='summary-label'>門市</span><span class='summary-value'>{store_count}</span></div>
         <div><span class='summary-label'>可售商品數</span><span class='summary-value'>{total_qty}</span></div>
         <div><span class='summary-label'>最近距離</span><span class='summary-value'>{nearest}</span></div>
+        <div><span class='summary-label'>品項分類</span><span class='summary-value tags'>{tags_html or '—'}</span></div>
     </div>
     """
 
@@ -250,9 +272,14 @@ def _render_table(rows):
     body_html = []
     for r in rows:
         qty_class = "qty-zero" if r["qty"] <= 0 else ""
+        tag_class = ""
+        if r.get("tag") == "麵":
+            tag_class = "cat-noodle"
+        elif r.get("tag") == "飯":
+            tag_class = "cat-rice"
         body_html.append(
             f"""
-            <tr class='{qty_class}'>
+            <tr class='{qty_class} {tag_class}'>
                 <td>{r["store_label"]}</td>
                 <td>{r["distance_m"]:.1f} m</td>
                 <td>{html.escape(r["item_label"])}</td>
@@ -290,11 +317,11 @@ def main():
             """
             <style>
             :root {
-                --primary: #ff7043;
-                --primary-weak: #ffe6dc;
+                --primary: #ff6b6b;
+                --primary-weak: #ffe0e0;
             }
             #primary-search-btn button {
-                background: linear-gradient(135deg, #ff8a50, #ff7043);
+                background: linear-gradient(135deg, #ff8a8a, #ff6b6b);
                 color: #fff !important;
                 font-weight: 800;
                 padding: 15px 22px !important;
@@ -329,10 +356,15 @@ def main():
             .qty-zero { color: #888; }
             .qty-cell { text-align: right; font-variant-numeric: tabular-nums; }
             .callout { padding: 12px 14px; border-radius: 10px; border: 1px solid #f0b8b8; background: #fff3f3; color: #a12b2b; }
+            .tag-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; margin-right: 6px; font-size: 12px; }
+            .tag-麵 { background: #ffe2e8; color: #b0233e; }
+            .tag-飯 { background: #fff1d6; color: #b46500; }
+            .cat-noodle td { background: #fff5f7; }
+            .cat-rice td { background: #fff9f0; }
             </style>
             """
         )
-        gr.Markdown("## 台灣7-11 和 family全家便利商店「即期食品」 乞丐時光搜尋")
+        gr.Markdown("## 台灣7-11 和 family全家便利商店「即期食品」 i珍食 友善食光 搜尋")
         gr.Markdown("""
         1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
         2. 也可手動輸入地址、緯度、經度與搜尋範圍後再按此按鈕
@@ -459,26 +491,22 @@ def main():
                     ];
                 };
                 if (mode === "用地址" && address && address.trim() !== "") {
-                    // 地址模式：直接交給後端 geocode，避免誤用上一筆座標
+                    // 地址模式：交給後端 geocode，不沿用舊座標
                     return finalize(0, 0);
                 }
-                const hasCoords = (Number(lat) || 0) !== 0 && (Number(lon) || 0) !== 0;
-                if (hasCoords) {
-                    return finalize(Number(lat) || 0, Number(lon) || 0);
-                }
+                // GPS 模式：優先取即時座標，失敗才用現有欄位值
                 return new Promise((resolve) => {
+                    const fallback = () => finalize(Number(lat) || 0, Number(lon) || 0);
                     if (!navigator.geolocation) {
                         alert("您的瀏覽器不支援地理位置功能");
-                        resolve(finalize(0, 0));
+                        resolve(fallback());
                         return;
                     }
                     navigator.geolocation.getCurrentPosition(
-                        (pos) => {
-                            resolve(finalize(pos.coords.latitude, pos.coords.longitude));
-                        },
+                        (pos) => resolve(finalize(pos.coords.latitude, pos.coords.longitude)),
                         (error) => {
                             alert("無法取得位置：" + error.message);
-                            resolve(finalize(0, 0));
+                            resolve(fallback());
                         }
                     );
                 });
