@@ -1,8 +1,18 @@
-import gradio as gr
 import requests
 import os
 import html
 from typing import Optional
+import huggingface_hub
+
+# Monkeypatch HfFolder to support older Gradio versions with newer huggingface_hub
+if not hasattr(huggingface_hub, "HfFolder"):
+    class HfFolder:
+        @classmethod
+        def get_token(cls):
+            return huggingface_hub.get_token()
+    huggingface_hub.HfFolder = HfFolder
+
+import gradio as gr
 
 # =============== 7-11 所需常數 ===============
 # 請確認此處的 MID_V 是否有效，若過期請更新
@@ -13,6 +23,53 @@ API_7_11_BASE = "https://lovefood.openpoint.com.tw/LoveFood/api"
 # =============== FamilyMart 所需常數 ===============
 FAMILY_PROJECT_CODE = "202106302"  # 若有需要請自行調整
 API_FAMILY = "https://stamp.family.com.tw/api/maps/MapProductInfo"
+
+TAG_ICONS = {
+    "麵": "🍜",
+    "湯": "🥣",
+    "飯": "🍚",
+    "飯糰": "🍙",
+}
+
+
+def categorize_tags(text: str):
+    if not text:
+        return []
+    tags = []
+    if "飯糰" in text:
+        tags.append("飯糰")
+    if "麵" in text:
+        tags.append("麵")
+    if "湯" in text:
+        tags.append("湯")
+    if "飯" in text and "飯糰" not in text:
+        tags.append("飯")
+    return tags
+
+
+def build_store_key(store_type: str, store_id: str):
+    return f"{store_type}:{store_id}"
+
+
+def build_favorite_choices(results, selected):
+    stores = {}
+    for r in results:
+        key = r["store_key"]
+        store_name = r.get("store_name") or ""
+        label = f"{r['store_type']} {store_name}"
+        dist = r.get("distance_m", 0)
+        if key not in stores or dist < stores[key]["distance_m"]:
+            stores[key] = {"label": label, "distance_m": dist}
+
+    choices = [
+        (v["label"], key)
+        for key, v in sorted(stores.items(), key=lambda item: item[1]["distance_m"])
+    ]
+    selected_set = set(selected or [])
+    selected_values = [key for key in (selected or []) if key in stores]
+    if selected_set:
+        selected_values = [key for key in (selected or []) if key in stores]
+    return gr.update(choices=choices, value=selected_values)
 
 
 def get_7_11_token():
@@ -73,7 +130,185 @@ def get_family_nearby_stores(lat, lon):
         raise RuntimeError(f"取得全家門市資料失敗: {js}")
     return js["data"]
 
-def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_1km, only_in_stock, input_mode):
+def apply_filters(
+    results,
+    distance_km,
+    store_filter,
+    only_under_1km,
+    only_in_stock,
+    tag_include,
+    tag_exclude,
+    only_favorites,
+    favorites,
+):
+    if not results:
+        return "", _render_error("❌ 尚未搜尋，請先按下「自動定位並搜尋」")
+
+    filtered = results
+    if distance_km:
+        max_distance = float(distance_km) * 1000
+        filtered = [r for r in filtered if r["distance_m"] <= max_distance]
+
+    if store_filter == "只看 7-11":
+        filtered = [r for r in filtered if r["store_type"] == "7-11"]
+    elif store_filter == "只看 全家":
+        filtered = [r for r in filtered if r["store_type"] == "全家"]
+
+    if only_under_1km:
+        filtered = [r for r in filtered if r["distance_m"] <= 1000]
+    if only_in_stock:
+        filtered = [r for r in filtered if r["qty"] > 0]
+
+    favorites_set = set(favorites or [])
+    if only_favorites:
+        filtered = [r for r in filtered if r.get("store_key") in favorites_set]
+
+    include_set = set(tag_include or [])
+    if include_set:
+        filtered = [
+            r for r in filtered if include_set.intersection(set(r.get("tags", [])))
+        ]
+
+    exclude_set = set(tag_exclude or [])
+    if exclude_set:
+        filtered = [
+            r for r in filtered if not exclude_set.intersection(set(r.get("tags", [])))
+        ]
+
+    filtered.sort(key=lambda x: x["distance_m"])
+
+    if not filtered:
+        return "", _render_error("❌ 沒有符合篩選條件的結果")
+
+    store_keys = {(r["store_type"], r["store_id"]) for r in filtered}
+    total_qty = sum(r["qty"] for r in filtered if r["qty"] > 0)
+    min_distance = min(r["distance_m"] for r in filtered) if filtered else None
+    summary_html = _render_summary(len(store_keys), total_qty, min_distance, filtered)
+    table_html = _render_table(filtered)
+
+    return summary_html, table_html
+
+def build_store_label(store_type, store_name):
+    safe_name = html.escape(store_name)
+    badge_class = "badge-711" if store_type == "7-11" else "badge-family"
+    badge_text = "7-11" if store_type == "7-11" else "全家"
+    return f"<span class='badge {badge_class}'>{badge_text}</span> {safe_name}"
+
+def fetch_nearby_stores_data(lat, lon):
+    results = []
+    # ------------------ 7-11 ------------------
+    try:
+        token_711 = get_7_11_token()
+        nearby_stores_711 = get_7_11_nearby_stores(token_711, lat, lon)
+        for store in nearby_stores_711:
+            dist_m = store.get("Distance", 999999)
+            store_no = store.get("StoreNo")
+            store_name = store.get("StoreName", "7-11 未提供店名")
+            store_key = build_store_key("7-11", store_no)
+            remaining_qty = store.get("RemainingQty", 0)
+            if remaining_qty > 0:
+                detail = get_7_11_store_detail(token_711, lat, lon, store_no)
+                for cat in detail.get("CategoryStockItems", []):
+                    cat_name = cat.get("Name", "")
+                    for item in cat.get("ItemList", []):
+                        item_name = item.get("ItemName", "")
+                        item_qty = item.get("RemainingQty", 0)
+                        tags = categorize_tags(f"{cat_name} {item_name}")
+                        results.append({
+                            "store_type": "7-11",
+                            "store_id": store_no,
+                            "store_key": store_key,
+                            "store_name": store_name,
+                            "store_label": build_store_label("7-11", store_name),
+                            "distance_m": dist_m,
+                            "item_label": f"{cat_name} - {item_name}",
+                            "qty": item_qty,
+                            "tags": tags,
+                        })
+            else:
+                results.append({
+                    "store_type": "7-11",
+                    "store_id": store_no,
+                    "store_key": store_key,
+                    "store_name": store_name,
+                    "store_label": build_store_label("7-11", store_name),
+                    "distance_m": dist_m,
+                    "item_label": "即期品 0 項",
+                    "qty": 0,
+                    "tags": [],
+                })
+    except Exception as e:
+        print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
+
+    # ------------------ FamilyMart ------------------
+    try:
+        nearby_stores_family = get_family_nearby_stores(lat, lon)
+        for store in nearby_stores_family:
+            dist_m = store.get("distance", 999999)
+            store_name = store.get("name", "全家 未提供店名")
+            info_list = store.get("info", [])
+            store_id = (
+                store.get("id")
+                or store.get("storeid")
+                or store.get("posCode")
+                or store_name
+            )
+            store_key = build_store_key("全家", store_id)
+            has_item = False
+            for big_cat in info_list:
+                big_cat_name = big_cat.get("name", "")
+                for subcat in big_cat.get("categories", []):
+                    subcat_name = subcat.get("name", "")
+                    for product in subcat.get("products", []):
+                        product_name = product.get("name", "")
+                        qty = product.get("qty", 0)
+                        if qty > 0:
+                            has_item = True
+                            tags = categorize_tags(
+                                f"{big_cat_name} {subcat_name} {product_name}"
+                            )
+                            results.append({
+                                "store_type": "全家",
+                                "store_id": store_id,
+                                "store_key": store_key,
+                                "store_name": store_name,
+                                "store_label": build_store_label("全家", store_name),
+                                "distance_m": dist_m,
+                                "item_label": f"{big_cat_name} - {subcat_name} - {product_name}",
+                                "qty": qty,
+                                "tags": tags,
+                            })
+            if not has_item:
+                results.append({
+                    "store_type": "全家",
+                    "store_id": store_id,
+                    "store_key": store_key,
+                    "store_name": store_name,
+                    "store_label": build_store_label("全家", store_name),
+                    "distance_m": dist_m,
+                    "item_label": "即期品 0 項",
+                    "qty": 0,
+                    "tags": [],
+                })
+    except Exception as e:
+        print(f"❌ 取得全家 即期品時發生錯誤: {e}")
+
+    return results
+
+def find_nearest_store(
+    address,
+    lat,
+    lon,
+    distance_km,
+    store_filter,
+    only_under_1km,
+    only_in_stock,
+    tag_include,
+    tag_exclude,
+    only_favorites,
+    favorites,
+    input_mode,
+):
     """
     distance_km: 選擇的公里數
     store_filter: '全部' / '只看 7-11' / '只看 全家'
@@ -83,7 +318,8 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
     """
     print(
         f"🔍 收到查詢請求: mode={input_mode}, address={address}, lat={lat}, lon={lon}, "
-        f"distance_km={distance_km}, filter={store_filter}, <1km={only_under_1km}, onlyStock={only_in_stock}"
+        f"distance_km={distance_km}, filter={store_filter}, <1km={only_under_1km}, "
+        f"onlyStock={only_in_stock}, tags_in={tag_include}, tags_out={tag_exclude}, onlyFav={only_favorites}"
     )
 
     # 若有填地址且 lat/lon 為 0，嘗試用 Google Geocoding API
@@ -107,147 +343,33 @@ def find_nearest_store(address, lat, lon, distance_km, store_filter, only_under_
                 print(f"地址轉換成功: {address} => lat={lat}, lon={lon}")
             else:
                 print(f"❌ Google Geocoding 失敗: {data}")
-                return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon
+                return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon, [], gr.update()
         except Exception as e:
             print(f"❌ Google Geocoding 失敗: {e}")
-            return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon
+            return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon, [], gr.update()
 
     if lat == 0 or lon == 0:
-        return "", _render_error("❌ 請輸入地址或提供 GPS 座標"), lat, lon
+        return "", _render_error("❌ 請輸入地址或提供 GPS 座標"), lat, lon, [], gr.update()
 
-    max_distance = float(distance_km) * 1000
-    results = []
-
-    def categorize_item(name: str):
-        if "麵" in name:
-            return ("麵", "🍜")
-        if "飯" in name:
-            return ("飯", "🍚")
-        return ("", "")
-
-    def build_store_label(store_type, store_name):
-        safe_name = html.escape(store_name)
-        badge_class = "badge-711" if store_type == "7-11" else "badge-family"
-        badge_text = "7-11" if store_type == "7-11" else "全家"
-        return f"<span class='badge {badge_class}'>{badge_text}</span> {safe_name}"
-
-    # ------------------ 7-11 ------------------
-    try:
-        token_711 = get_7_11_token()
-        nearby_stores_711 = get_7_11_nearby_stores(token_711, lat, lon)
-        for store in nearby_stores_711:
-            dist_m = store.get("Distance", 999999)
-            if dist_m <= max_distance:
-                store_no = store.get("StoreNo")
-                store_name = store.get("StoreName", "7-11 未提供店名")
-                remaining_qty = store.get("RemainingQty", 0)
-                if remaining_qty > 0:
-                    detail = get_7_11_store_detail(token_711, lat, lon, store_no)
-                    for cat in detail.get("CategoryStockItems", []):
-                        cat_name = cat.get("Name", "")
-                        for item in cat.get("ItemList", []):
-                            item_name = item.get("ItemName", "")
-                            item_qty = item.get("RemainingQty", 0)
-                            tag, tag_icon = categorize_item(item_name)
-                            results.append({
-                                "store_type": "7-11",
-                                "store_id": store_no,
-                                "store_label": build_store_label("7-11", store_name),
-                                "distance_m": dist_m,
-                                "item_label": f"{cat_name} - {item_name}",
-                                "qty": item_qty,
-                                "tag": tag,
-                                "tag_icon": tag_icon,
-                            })
-                else:
-                    results.append({
-                        "store_type": "7-11",
-                        "store_id": store_no,
-                        "store_label": build_store_label("7-11", store_name),
-                        "distance_m": dist_m,
-                        "item_label": "即期品 0 項",
-                        "qty": 0,
-                        "tag": "",
-                        "tag_icon": "",
-                    })
-    except Exception as e:
-        print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
-
-    # ------------------ FamilyMart ------------------
-    try:
-        nearby_stores_family = get_family_nearby_stores(lat, lon)
-        for store in nearby_stores_family:
-            dist_m = store.get("distance", 999999)
-            if dist_m <= max_distance:
-                store_name = store.get("name", "全家 未提供店名")
-                info_list = store.get("info", [])
-                store_id = (
-                    store.get("id")
-                    or store.get("storeid")
-                    or store.get("posCode")
-                    or store_name
-                )
-                has_item = False
-                for big_cat in info_list:
-                    big_cat_name = big_cat.get("name", "")
-                    for subcat in big_cat.get("categories", []):
-                        subcat_name = subcat.get("name", "")
-                        for product in subcat.get("products", []):
-                            product_name = product.get("name", "")
-                            qty = product.get("qty", 0)
-                            if qty > 0:
-                                has_item = True
-                                tag, tag_icon = categorize_item(product_name)
-                                results.append({
-                                    "store_type": "全家",
-                                    "store_id": store_id,
-                                    "store_label": build_store_label("全家", store_name),
-                                    "distance_m": dist_m,
-                                    "item_label": f"{big_cat_name} - {subcat_name} - {product_name}",
-                                    "qty": qty,
-                                    "tag": tag,
-                                    "tag_icon": tag_icon,
-                                })
-                if not has_item:
-                    results.append({
-                        "store_type": "全家",
-                        "store_id": store_id,
-                        "store_label": build_store_label("全家", store_name),
-                        "distance_m": dist_m,
-                        "item_label": "即期品 0 項",
-                        "qty": 0,
-                        "tag": "",
-                        "tag_icon": "",
-                    })
-    except Exception as e:
-        print(f"❌ 取得全家 即期品時發生錯誤: {e}")
+    results = fetch_nearby_stores_data(lat, lon)
 
     if not results:
-        return "", _render_error("❌ 附近沒有即期食品 (在所選公里範圍內)"), lat, lon
+        return "", _render_error("❌ 附近沒有即期食品 (在所選公里範圍內)"), lat, lon, [], gr.update()
 
-    filtered = results
-    if store_filter == "只看 7-11":
-        filtered = [r for r in filtered if r["store_type"] == "7-11"]
-    elif store_filter == "只看 全家":
-        filtered = [r for r in filtered if r["store_type"] == "全家"]
+    summary_html, table_html = apply_filters(
+        results,
+        distance_km,
+        store_filter,
+        only_under_1km,
+        only_in_stock,
+        tag_include,
+        tag_exclude,
+        only_favorites,
+        favorites,
+    )
+    favorites_update = build_favorite_choices(results, favorites)
 
-    if only_under_1km:
-        filtered = [r for r in filtered if r["distance_m"] <= 1000]
-    if only_in_stock:
-        filtered = [r for r in filtered if r["qty"] > 0]
-
-    filtered.sort(key=lambda x: x["distance_m"])
-
-    if not filtered:
-        return "", _render_error("❌ 沒有符合篩選條件的結果"), lat, lon
-
-    store_keys = {(r["store_type"], r["store_id"]) for r in filtered}
-    total_qty = sum(r["qty"] for r in filtered if r["qty"] > 0)
-    min_distance = min(r["distance_m"] for r in filtered) if filtered else None
-    summary_html = _render_summary(len(store_keys), total_qty, min_distance, filtered)
-    table_html = _render_table(filtered)
-
-    return summary_html, table_html, lat, lon
+    return summary_html, table_html, lat, lon, results, favorites_update
 
 def _render_error(msg: str):
     safe_msg = html.escape(msg)
@@ -255,14 +377,13 @@ def _render_error(msg: str):
 
 def _render_summary(store_count: int, total_qty: int, min_distance: Optional[float], rows):
     nearest = f"{min_distance:.1f} m" if min_distance is not None else "—"
-    tag_counts = {"麵": 0, "飯": 0}
-    tag_icons = {"麵": "🍜", "飯": "🍚"}
+    tag_counts = {k: 0 for k in TAG_ICONS.keys()}
     for r in rows:
-        tag = r.get("tag") or ""
-        if tag in tag_counts:
-            tag_counts[tag] += 1
+        for tag in r.get("tags", []):
+            if tag in tag_counts:
+                tag_counts[tag] += 1
     tags_html = "".join(
-        f"<span class='tag-chip tag-{k}'>{tag_icons.get(k, '')} {k} {v}</span>"
+        f"<span class='tag-chip tag-{k}'>{TAG_ICONS.get(k, '')} {k} {v}</span>"
         for k, v in tag_counts.items()
         if v > 0
     )
@@ -279,15 +400,21 @@ def _render_table(rows):
     body_html = []
     for r in rows:
         qty_class = "qty-zero" if r["qty"] <= 0 else ""
+        tags = r.get("tags", [])
         tag_class = ""
-        if r.get("tag") == "麵":
+        if "麵" in tags:
             tag_class = "cat-noodle"
-        elif r.get("tag") == "飯":
+        elif "湯" in tags:
+            tag_class = "cat-soup"
+        elif "飯糰" in tags:
+            tag_class = "cat-riceball"
+        elif "飯" in tags:
             tag_class = "cat-rice"
-        tag_icon = r.get("tag_icon") or ""
-        tag_html = ""
-        if r.get("tag"):
-            tag_html = f"<span class='tag-pill tag-{r['tag']}'>{tag_icon} {r['tag']}</span>"
+
+        tag_html = "".join(
+            f"<span class='tag-pill tag-{tag}'>{TAG_ICONS.get(tag, '')} {tag}</span>"
+            for tag in tags
+        )
         item_cell = f"{tag_html}{html.escape(r['item_label'])}"
         body_html.append(
             f"""
@@ -318,8 +445,6 @@ def _render_table(rows):
     """
 
 # ========== Gradio 介面 ==========
-
-import gradio as gr
 
 def main():
     with gr.Blocks(
@@ -371,12 +496,18 @@ def main():
             .callout { padding: 12px 14px; border-radius: 10px; border: 1px solid #f0b8b8; background: #fff3f3; color: #a12b2b; }
             .tag-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; margin-right: 6px; font-size: 12px; }
             .tag-麵 { background: #ffe2e8; color: #b0233e; }
+            .tag-湯 { background: #e8f1ff; color: #2b4ba1; }
             .tag-飯 { background: #fff1d6; color: #b46500; }
+            .tag-飯糰 { background: #e8ffe8; color: #2b7a3d; }
             .cat-noodle td { background: #fff5f7; }
+            .cat-soup td { background: #f4f8ff; }
             .cat-rice td { background: #fff9f0; }
+            .cat-riceball td { background: #f4fff4; }
             .tag-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 8px; font-size: 12px; margin-right: 6px; }
             .tag-pill.tag-麵 { background: #ffe2e8; color: #b0233e; }
+            .tag-pill.tag-湯 { background: #e8f1ff; color: #2b4ba1; }
             .tag-pill.tag-飯 { background: #fff1d6; color: #b46500; }
+            .tag-pill.tag-飯糰 { background: #e8ffe8; color: #2b7a3d; }
             </style>
             """
         )
@@ -427,14 +558,62 @@ def main():
             only_under_1km = gr.Checkbox(label="只看 1 公里內", value=False)
             only_in_stock = gr.Checkbox(label="只顯示有庫存", value=True)
 
+        with gr.Row():
+            only_favorites = gr.Checkbox(label="只看愛店", value=False)
+            tag_include = gr.CheckboxGroup(
+                label="品項標籤（包含）",
+                choices=list(TAG_ICONS.keys()),
+                value=[],
+                interactive=True,
+            )
+            tag_exclude = gr.CheckboxGroup(
+                label="品項標籤（排除）",
+                choices=list(TAG_ICONS.keys()),
+                value=[],
+                interactive=True,
+            )
+
+        favorites_group = gr.CheckboxGroup(
+            label="愛店清單",
+            choices=[],
+            value=[],
+            interactive=True,
+        )
+
         summary_html = gr.HTML("")
         results_html = gr.HTML("")
+        results_state = gr.State([])
+        favorites_state = gr.State([])
 
         def on_mode_change(mode):
             return (
                 gr.update(visible=mode == "用地址"),
                 gr.update(visible=mode == "用 GPS"),
             )
+
+        def on_favorites_change(
+            favorites,
+            results,
+            distance_km,
+            store_filter,
+            only_under_1km,
+            only_in_stock,
+            tag_include,
+            tag_exclude,
+            only_favorites,
+        ):
+            summary_html, table_html = apply_filters(
+                results,
+                distance_km,
+                store_filter,
+                only_under_1km,
+                only_in_stock,
+                tag_include,
+                tag_exclude,
+                only_favorites,
+                favorites,
+            )
+            return favorites, summary_html, table_html
 
         input_mode.change(
             fn=on_mode_change,
@@ -443,14 +622,34 @@ def main():
         )
 
         demo.load(
-            fn=lambda: ("", 0, 0, 3, "全部", False, True, "用 GPS"),
-            outputs=[address, lat, lon, distance_slider, store_filter, only_under_1km, only_in_stock, input_mode],
+            fn=lambda: ("", 0, 0, 3, "全部", False, True, "用 GPS", [], [], False, []),
+            outputs=[
+                address,
+                lat,
+                lon,
+                distance_slider,
+                store_filter,
+                only_under_1km,
+                only_in_stock,
+                input_mode,
+                tag_include,
+                tag_exclude,
+                only_favorites,
+                favorites_state,
+            ],
             js="""
             () => {
                 const getNum = (key, fallback) => {
                     const raw = localStorage.getItem(key);
                     const n = raw === null ? fallback : Number(raw);
                     return isNaN(n) ? fallback : n;
+                };
+                const getList = (key) => {
+                    try {
+                        return JSON.parse(localStorage.getItem(key) || '[]');
+                    } catch (e) {
+                        return [];
+                    }
                 };
                 return [
                     localStorage.getItem('addr') || '',
@@ -461,6 +660,10 @@ def main():
                     localStorage.getItem('lt1k') === 'true',
                     localStorage.getItem('onlyStock') !== 'false',
                     localStorage.getItem('mode') || '用 GPS',
+                    getList('tags_include'),
+                    getList('tags_exclude'),
+                    localStorage.getItem('onlyFavorites') === 'true',
+                    getList('favorites'),
                 ];
             }
             """,
@@ -474,10 +677,23 @@ def main():
 
         auto_gps_search_button.click(
             fn=find_nearest_store,
-            inputs=[address, lat, lon, distance_slider, store_filter, only_under_1km, only_in_stock, input_mode],
-            outputs=[summary_html, results_html, lat, lon],
+            inputs=[
+                address,
+                lat,
+                lon,
+                distance_slider,
+                store_filter,
+                only_under_1km,
+                only_in_stock,
+                tag_include,
+                tag_exclude,
+                only_favorites,
+                favorites_state,
+                input_mode,
+            ],
+            outputs=[summary_html, results_html, lat, lon, results_state, favorites_group],
             js="""
-            (address, lat, lon, distance, storeFilter, under1k, onlyStock, mode) => {
+            (address, lat, lon, distance, storeFilter, under1k, onlyStock, tagInclude, tagExclude, onlyFavorites, favorites, mode) => {
                 const distanceVal = Number(distance) || 0;
                 const savePrefs = (addr, la, lo, dist) => {
                     localStorage.setItem('mode', mode);
@@ -488,6 +704,10 @@ def main():
                     localStorage.setItem('store_filter', storeFilter || '全部');
                     localStorage.setItem('lt1k', under1k ? 'true' : 'false');
                     localStorage.setItem('onlyStock', onlyStock ? 'true' : 'false');
+                    localStorage.setItem('tags_include', JSON.stringify(tagInclude || []));
+                    localStorage.setItem('tags_exclude', JSON.stringify(tagExclude || []));
+                    localStorage.setItem('onlyFavorites', onlyFavorites ? 'true' : 'false');
+                    localStorage.setItem('favorites', JSON.stringify(favorites || []));
                 };
                 const finalize = (newLat, newLon) => {
                     savePrefs(address, newLat, newLon, distanceVal);
@@ -499,11 +719,11 @@ def main():
                         storeFilter,
                         under1k,
                         onlyStock,
+                        tagInclude,
+                        tagExclude,
+                        onlyFavorites,
+                        favorites,
                         mode,
-                        null,
-                        null,
-                        newLat,
-                        newLon,
                     ];
                 };
                 if (mode === "用地址" && address && address.trim() !== "") {
@@ -530,13 +750,53 @@ def main():
             """
         )
 
-        # 篩選器變動時即時重新查詢（沿用當前欄位值）
-        for ctrl in (store_filter, only_under_1km, only_in_stock, distance_slider):
+        # 篩選器變動時只套用快取結果（不重新查詢）
+        for ctrl in (
+            store_filter,
+            only_under_1km,
+            only_in_stock,
+            distance_slider,
+            tag_include,
+            tag_exclude,
+            only_favorites,
+        ):
             ctrl.change(
-                fn=find_nearest_store,
-                inputs=[address, lat, lon, distance_slider, store_filter, only_under_1km, only_in_stock, input_mode],
-                outputs=[summary_html, results_html, lat, lon],
+                fn=apply_filters,
+                inputs=[
+                    results_state,
+                    distance_slider,
+                    store_filter,
+                    only_under_1km,
+                    only_in_stock,
+                    tag_include,
+                    tag_exclude,
+                    only_favorites,
+                    favorites_state,
+                ],
+                outputs=[summary_html, results_html],
             )
+
+        favorites_group.change(
+            fn=on_favorites_change,
+            inputs=[
+                favorites_group,
+                results_state,
+                distance_slider,
+                store_filter,
+                only_under_1km,
+                only_in_stock,
+                tag_include,
+                tag_exclude,
+                only_favorites,
+            ],
+            outputs=[favorites_state, summary_html, results_html],
+            js="""
+            (favorites, results, distance, storeFilter, under1k, onlyStock, tagInclude, tagExclude, onlyFavorites) => {
+                localStorage.setItem('favorites', JSON.stringify(favorites || []));
+                return [favorites, results, distance, storeFilter, under1k, onlyStock, tagInclude, tagExclude, onlyFavorites];
+            }
+            """,
+        )
 
         demo.launch(
             server_name="0.0.0.0",
