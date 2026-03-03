@@ -515,7 +515,7 @@ def main():
         gr.Markdown("""
         1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
         2. 也可手動輸入地址、緯度、經度與搜尋範圍後再按此按鈕
-        3. 意見反應 https://bento.me/david888 
+        3. 意見反應 https://david888.com 
         """)
 
         with gr.Row():
@@ -556,10 +556,18 @@ def main():
                 interactive=True,
             )
             only_under_1km = gr.Checkbox(label="只看 1 公里內", value=False)
-            only_in_stock = gr.Checkbox(label="只顯示有庫存", value=True)
 
         with gr.Row():
             only_favorites = gr.Checkbox(label="只看愛店", value=False)
+            favorites_group = gr.CheckboxGroup(
+                label="愛店清單",
+                choices=[],
+                value=[],
+                interactive=True,
+            )
+
+        with gr.Row():
+            only_in_stock = gr.Checkbox(label="只顯示有庫存", value=True)
             tag_include = gr.CheckboxGroup(
                 label="品項標籤（包含）",
                 choices=list(TAG_ICONS.keys()),
@@ -572,13 +580,6 @@ def main():
                 value=[],
                 interactive=True,
             )
-
-        favorites_group = gr.CheckboxGroup(
-            label="愛店清單",
-            choices=[],
-            value=[],
-            interactive=True,
-        )
 
         summary_html = gr.HTML("")
         results_html = gr.HTML("")
