@@ -539,35 +539,37 @@ def main():
                 lat = gr.Number(label="GPS 緯度", value=0, elem_id="lat")
                 lon = gr.Number(label="GPS 經度", value=0, elem_id="lon")
 
-        distance_slider = gr.Slider(
-            label="搜尋範圍 (公里)",
-            minimum=1,
-            maximum=21,
-            step=1,
-            value=3,
+        with gr.Row():
+            distance_slider = gr.Slider(
+                label="搜尋範圍 (公里)",
+                minimum=1,
+                maximum=21,
+                step=1,
+                value=3,
+                interactive=True,
+                scale=2
+            )
+            store_filter = gr.Radio(
+                label="門市品牌",
+                choices=["全部", "只看 7-11", "只看 全家"],
+                value="全部",
+                interactive=True,
+                scale=1
+            )
+
+        with gr.Row():
+            only_under_1km = gr.Checkbox(label="只看 1 公里內", value=False)
+            only_favorites = gr.Checkbox(label="只看愛店", value=False)
+            only_in_stock = gr.Checkbox(label="只顯示有庫存", value=True)
+
+        favorites_group = gr.CheckboxGroup(
+            label="愛店清單",
+            choices=[],
+            value=[],
             interactive=True,
         )
 
         with gr.Row():
-            store_filter = gr.Radio(
-                label="門市篩選",
-                choices=["全部", "只看 7-11", "只看 全家"],
-                value="全部",
-                interactive=True,
-            )
-            only_under_1km = gr.Checkbox(label="只看 1 公里內", value=False)
-
-        with gr.Row():
-            only_favorites = gr.Checkbox(label="只看愛店", value=False)
-            favorites_group = gr.CheckboxGroup(
-                label="愛店清單",
-                choices=[],
-                value=[],
-                interactive=True,
-            )
-
-        with gr.Row():
-            only_in_stock = gr.Checkbox(label="只顯示有庫存", value=True)
             tag_include = gr.CheckboxGroup(
                 label="品項標籤（包含）",
                 choices=list(TAG_ICONS.keys()),
