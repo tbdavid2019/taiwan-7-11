@@ -4,7 +4,7 @@ emoji: 🌖
 colorFrom: indigo
 colorTo: pink
 sdk: gradio
-sdk_version: 5.16.0
+sdk_version: 4.44.1
 app_file: app.py
 pinned: false
 short_description: 便利商店的打折品
