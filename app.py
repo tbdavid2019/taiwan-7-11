@@ -20,7 +20,7 @@ import gradio as gr
 
 # =============== 7-11 所需常數 ===============
 # 請確認此處的 MID_V 是否有效，若過期請更新
-MID_V = "W0_DiF4DlgU5OeQoRswrRcaaNHMWOL7K3ra3385ocZcv-bBOWySZvoUtH6j-7pjiccl0C5h30uRUNbJXsABCKMqiekSb7tdiBNdVq8Ro5jgk6sgvhZla5iV0H3-8dZfASc7AhEm85679LIK3hxN7Sam6D0LAnYK9Lb0DZhn7xeTeksB4IsBx4Msr_VI"
+MID_V = "W0_DiF4DlgU5OeQoRswrRcaaNHMWOL7K3ra3381ocZUv-rdOWy-ZuIItG6T-7pjiccl0C5h41-cHaupfvgcXKJKifEvNt9NiU94M_ZVp42Ig7JEn15la5iV0H3-8dZfASc7Mgke95qb9LYu3ghJ5Sam6D0LAnYK9Lb0DZohVkl1N5OTvWXvPb4VqEek"
 USER_AGENT_7_11 = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 API_7_11_BASE = "https://lovefood.openpoint.com.tw/LoveFood/api"
 DATA_DIR = Path(__file__).resolve().parent / "data"
