@@ -23,12 +23,14 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 > 1. 需要有效的 `MID_V` 值才能查詢 7-11 資料。`MID_V` 可能會隨官方更新而失效，需自行抓包或取得授權。  
 > 2. 全家 API 可能會變動或停止。  
 > 3. 本專案僅供研究教學之用，請勿用於商業或非法目的。
+> 4. 當 7-11 即期品 API 無法使用時，系統會退回本地靜態 7-11 門市資料，顯示附近門市與地址，但不提供即期品庫存。
 
 ## 功能
 
 - 以 GPS 座標或地址（自動轉換為經緯度，支援 Google Geocoding API）搜尋附近的 7-11 / 全家門市。
 - 可自訂搜尋範圍（3 / 5 / 7 / 13 / 21 公里）。
 - 顯示每間門市的即期食品清單與剩餘數量。
+- 當 7-11 live API 失效時，自動改用本地靜態門市資料顯示附近 7-11 與地址。
 - 搜尋完成後，於按鈕下方顯示 Google Maps 標記，呈現已取得的門市位置（需提供 API key）。
 
 ## 使用方式
@@ -52,10 +54,38 @@ Check out the configuration reference at https://huggingface.co/docs/hub/spaces-
 
 4. 瀏覽器打開 [http://127.0.0.1:7860](http://127.0.0.1:7860)，即可看到查詢介面。
 
+## 更新本地 7-11 靜態資料
+
+當 7-11 `MID_V` 過期時，專案會使用本地靜態門市資料作為 fallback。可用下列指令更新本地資料：
+
+```bash
+python scripts/update_7_11_data.py
+```
+
+此腳本會更新：
+
+- `data/seven_eleven_stores.json`
+- `data/seven_eleven_stores_metadata.json`
+
+其中 metadata 會記錄：
+
+- 資料更新時間
+- 正規化後的門市筆數
+- primary / supplemental source 筆數
+- 上游來源網址
+
+## 7-11 資料來源
+
+- `stores.yaml`: https://raw.githubusercontent.com/Cojad/taiwan-7Eleven-store/refs/heads/master/stores.yaml
+- `taiwan-cvs-map repo`: https://github.com/Minato1123/taiwan-cvs-map
+- `7-11 抓取腳本`: https://raw.githubusercontent.com/Minato1123/taiwan-cvs-map/main/scripts/fetch-711-mart-list.ts
+- `7-11 門市 JSON`: https://raw.githubusercontent.com/Minato1123/taiwan-cvs-map/main/src/assets/json/s_data.json
+
 ## 注意事項
 
 - 此為個人練習與技術示範，非官方專案。
 - 若出現「憑證過期」或「Token 失敗」等訊息，表示 MID_V 失效，需要更新。
+- 若 7-11 API 失效但本地 fallback 資料存在，畫面仍會顯示附近 7-11 門市與地址。
 - 地址查詢與地圖展示均需設定 Google Maps API 金鑰於 `.env`（欄位 `GOOGLE_MAPS_API_KEY`）或部署環境變數中。
 
 ---
@@ -69,12 +99,14 @@ This project uses unofficial APIs to query expiring-food items in Taiwan’s 7-1
 - A valid MID_V is required to access 7-11’s data. MID_V may expire as the official app updates. You must capture or obtain it by yourself.
 - FamilyMart’s API might change or be discontinued without notice.
 - This project is for educational and research purposes only. Please do not use it for commercial or illegal purposes.
+- When the 7-11 live API is unavailable, the app falls back to local static 7-11 store data and shows nearby stores plus addresses without live inventory counts.
 
 ### Features
 
 - Search nearby 7-11 / FamilyMart stores by GPS coordinates or address (auto geocoding via Google API).
 - Customizable search radius (3 / 5 / 7 / 13 / 21 km).
 - Display each store’s expiring-food items and remaining quantity.
+- Fall back to local static 7-11 store data when the live 7-11 API is unavailable.
 - Show store markers on Google Maps after each search (requires API key).
 
 ### Usage
@@ -98,5 +130,24 @@ This project uses unofficial APIs to query expiring-food items in Taiwan’s 7-1
 
 4. Open [http://127.0.0.1:7860](http://127.0.0.1:7860) in your browser to access the interface.
 
----
+### Refresh Local 7-11 Fallback Data
 
+Run:
+
+```bash
+python scripts/update_7_11_data.py
+```
+
+This refreshes:
+
+- `data/seven_eleven_stores.json`
+- `data/seven_eleven_stores_metadata.json`
+
+### 7-11 Source References
+
+- `stores.yaml`: https://raw.githubusercontent.com/Cojad/taiwan-7Eleven-store/refs/heads/master/stores.yaml
+- `taiwan-cvs-map repo`: https://github.com/Minato1123/taiwan-cvs-map
+- `7-11 fetch script`: https://raw.githubusercontent.com/Minato1123/taiwan-cvs-map/main/scripts/fetch-711-mart-list.ts
+- `7-11 store JSON`: https://raw.githubusercontent.com/Minato1123/taiwan-cvs-map/main/src/assets/json/s_data.json
+
+---

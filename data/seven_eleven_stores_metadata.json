@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-03-20T05:53:07+00:00",
+  "counts": {
+    "normalized_stores": 7325,
+    "primary_records": 7325,
+    "supplemental_records": 7236
+  },
+  "sources": [
+    {
+      "name": "7-11 store JSON",
+      "url": "https://raw.githubusercontent.com/Minato1123/taiwan-cvs-map/main/src/assets/json/s_data.json",
+      "reference_repo": "https://github.com/Minato1123/taiwan-cvs-map",
+      "reference_script": "https://raw.githubusercontent.com/Minato1123/taiwan-cvs-map/main/scripts/fetch-711-mart-list.ts"
+    },
+    {
+      "name": "7-11 stores.yaml",
+      "url": "https://raw.githubusercontent.com/Cojad/taiwan-7Eleven-store/refs/heads/master/stores.yaml"
+    }
+  ]
+}

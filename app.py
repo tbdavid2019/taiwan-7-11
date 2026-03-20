@@ -1,6 +1,10 @@
 import requests
 import os
 import html
+import json
+import math
+from pathlib import Path
+from functools import lru_cache
 from typing import Optional
 import huggingface_hub
 
@@ -19,6 +23,8 @@ import gradio as gr
 MID_V = "W0_DiF4DlgU5OeQoRswrRcaaNHMWOL7K3ra3385ocZcv-bBOWySZvoUtH6j-7pjiccl0C5h30uRUNbJXsABCKMqiekSb7tdiBNdVq8Ro5jgk6sgvhZla5iV0H3-8dZfASc7AhEm85679LIK3hxN7Sam6D0LAnYK9Lb0DZhn7xeTeksB4IsBx4Msr_VI"
 USER_AGENT_7_11 = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
 API_7_11_BASE = "https://lovefood.openpoint.com.tw/LoveFood/api"
+DATA_DIR = Path(__file__).resolve().parent / "data"
+SEVEN_ELEVEN_STORES_PATH = DATA_DIR / "seven_eleven_stores.json"
 
 # =============== FamilyMart 所需常數 ===============
 FAMILY_PROJECT_CODE = "202106302"  # 若有需要請自行調整
@@ -49,6 +55,31 @@ def categorize_tags(text: str):
 
 def build_store_key(store_type: str, store_id: str):
     return f"{store_type}:{store_id}"
+
+
+@lru_cache(maxsize=1)
+def load_7_11_fallback_stores():
+    if not SEVEN_ELEVEN_STORES_PATH.exists():
+        print(f"⚠️ 找不到 7-11 fallback 資料: {SEVEN_ELEVEN_STORES_PATH}")
+        return []
+
+    with SEVEN_ELEVEN_STORES_PATH.open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return payload.get("stores", [])
+
+
+def haversine_meters(lat1, lon1, lat2, lon2):
+    radius_m = 6371000
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = (
+        math.sin(delta_phi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return radius_m * c
 
 
 def build_favorite_choices(results, selected):
@@ -157,7 +188,11 @@ def apply_filters(
     if only_under_1km:
         filtered = [r for r in filtered if r["distance_m"] <= 1000]
     if only_in_stock:
-        filtered = [r for r in filtered if r["qty"] > 0]
+        filtered = [
+            r
+            for r in filtered
+            if r["qty"] > 0 or r.get("data_source") == "7-11-fallback"
+        ]
 
     favorites_set = set(favorites or [])
     if only_favorites:
@@ -194,6 +229,52 @@ def build_store_label(store_type, store_name):
     badge_text = "7-11" if store_type == "7-11" else "全家"
     return f"<span class='badge {badge_class}'>{badge_text}</span> {safe_name}"
 
+
+def build_result_row(
+    store_type,
+    store_id,
+    store_name,
+    distance_m,
+    item_label,
+    qty,
+    tags,
+    data_source,
+    address="",
+):
+    return {
+        "store_type": store_type,
+        "store_id": store_id,
+        "store_key": build_store_key(store_type, store_id),
+        "store_name": store_name,
+        "store_label": build_store_label(store_type, store_name),
+        "distance_m": distance_m,
+        "item_label": item_label,
+        "qty": qty,
+        "tags": tags,
+        "data_source": data_source,
+        "address": address or "",
+    }
+
+
+def get_7_11_fallback_rows(lat, lon):
+    rows = []
+    for store in load_7_11_fallback_stores():
+        distance_m = haversine_meters(lat, lon, store["lat"], store["lng"])
+        rows.append(
+            build_result_row(
+                "7-11",
+                str(store["id"]),
+                store["name"],
+                distance_m,
+                "靜態門市資料（未提供即期品）",
+                0,
+                [],
+                "7-11-fallback",
+                address=store.get("address", ""),
+            )
+        )
+    return rows
+
 def fetch_nearby_stores_data(lat, lon):
     results = []
     # ------------------ 7-11 ------------------
@@ -204,7 +285,6 @@ def fetch_nearby_stores_data(lat, lon):
             dist_m = store.get("Distance", 999999)
             store_no = store.get("StoreNo")
             store_name = store.get("StoreName", "7-11 未提供店名")
-            store_key = build_store_key("7-11", store_no)
             remaining_qty = store.get("RemainingQty", 0)
             if remaining_qty > 0:
                 detail = get_7_11_store_detail(token_711, lat, lon, store_no)
@@ -214,31 +294,34 @@ def fetch_nearby_stores_data(lat, lon):
                         item_name = item.get("ItemName", "")
                         item_qty = item.get("RemainingQty", 0)
                         tags = categorize_tags(f"{cat_name} {item_name}")
-                        results.append({
-                            "store_type": "7-11",
-                            "store_id": store_no,
-                            "store_key": store_key,
-                            "store_name": store_name,
-                            "store_label": build_store_label("7-11", store_name),
-                            "distance_m": dist_m,
-                            "item_label": f"{cat_name} - {item_name}",
-                            "qty": item_qty,
-                            "tags": tags,
-                        })
+                        results.append(
+                            build_result_row(
+                                "7-11",
+                                store_no,
+                                store_name,
+                                dist_m,
+                                f"{cat_name} - {item_name}",
+                                item_qty,
+                                tags,
+                                "7-11-live",
+                            )
+                        )
             else:
-                results.append({
-                    "store_type": "7-11",
-                    "store_id": store_no,
-                    "store_key": store_key,
-                    "store_name": store_name,
-                    "store_label": build_store_label("7-11", store_name),
-                    "distance_m": dist_m,
-                    "item_label": "即期品 0 項",
-                    "qty": 0,
-                    "tags": [],
-                })
+                results.append(
+                    build_result_row(
+                        "7-11",
+                        store_no,
+                        store_name,
+                        dist_m,
+                        "即期品 0 項",
+                        0,
+                        [],
+                        "7-11-live",
+                    )
+                )
     except Exception as e:
         print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
+        results.extend(get_7_11_fallback_rows(lat, lon))
 
     # ------------------ FamilyMart ------------------
     try:
@@ -253,7 +336,6 @@ def fetch_nearby_stores_data(lat, lon):
                 or store.get("posCode")
                 or store_name
             )
-            store_key = build_store_key("全家", store_id)
             has_item = False
             for big_cat in info_list:
                 big_cat_name = big_cat.get("name", "")
@@ -267,29 +349,31 @@ def fetch_nearby_stores_data(lat, lon):
                             tags = categorize_tags(
                                 f"{big_cat_name} {subcat_name} {product_name}"
                             )
-                            results.append({
-                                "store_type": "全家",
-                                "store_id": store_id,
-                                "store_key": store_key,
-                                "store_name": store_name,
-                                "store_label": build_store_label("全家", store_name),
-                                "distance_m": dist_m,
-                                "item_label": f"{big_cat_name} - {subcat_name} - {product_name}",
-                                "qty": qty,
-                                "tags": tags,
-                            })
+                            results.append(
+                                build_result_row(
+                                    "全家",
+                                    store_id,
+                                    store_name,
+                                    dist_m,
+                                    f"{big_cat_name} - {subcat_name} - {product_name}",
+                                    qty,
+                                    tags,
+                                    "family-live",
+                                )
+                            )
             if not has_item:
-                results.append({
-                    "store_type": "全家",
-                    "store_id": store_id,
-                    "store_key": store_key,
-                    "store_name": store_name,
-                    "store_label": build_store_label("全家", store_name),
-                    "distance_m": dist_m,
-                    "item_label": "即期品 0 項",
-                    "qty": 0,
-                    "tags": [],
-                })
+                results.append(
+                    build_result_row(
+                        "全家",
+                        store_id,
+                        store_name,
+                        dist_m,
+                        "即期品 0 項",
+                        0,
+                        [],
+                        "family-live",
+                    )
+                )
     except Exception as e:
         print(f"❌ 取得全家 即期品時發生錯誤: {e}")
 
@@ -354,7 +438,7 @@ def find_nearest_store(
     results = fetch_nearby_stores_data(lat, lon)
 
     if not results:
-        return "", _render_error("❌ 附近沒有即期食品 (在所選公里範圍內)"), lat, lon, [], gr.update()
+        return "", _render_error("❌ 附近沒有可顯示的門市或即期品"), lat, lon, [], gr.update()
 
     summary_html, table_html = apply_filters(
         results,
@@ -387,7 +471,13 @@ def _render_summary(store_count: int, total_qty: int, min_distance: Optional[flo
         for k, v in tag_counts.items()
         if v > 0
     )
+    notices = []
+    if any(r.get("data_source") == "7-11-fallback" for r in rows):
+        notices.append(
+            "<div class='callout callout-info'>7-11 即期品 API 暫時不可用，以下改顯示附近 7-11 靜態門市資料與地址。</div>"
+        )
     return f"""
+    {''.join(notices)}
     <div class='summary-bar'>
         <div><span class='summary-label'>門市</span><span class='summary-value'>{store_count}</span></div>
         <div><span class='summary-label'>可售商品數</span><span class='summary-value'>{total_qty}</span></div>
@@ -416,10 +506,15 @@ def _render_table(rows):
             for tag in tags
         )
         item_cell = f"{tag_html}{html.escape(r['item_label'])}"
+        address_html = (
+            f"<div class='store-address'>{html.escape(r['address'])}</div>"
+            if r.get("address")
+            else ""
+        )
         body_html.append(
             f"""
             <tr class='{qty_class} {tag_class}'>
-                <td>{r["store_label"]}</td>
+                <td>{r["store_label"]}{address_html}</td>
                 <td>{r["distance_m"]:.1f} m</td>
                 <td>{item_cell}</td>
                 <td class='qty-cell'>{r["qty"]}</td>
@@ -494,6 +589,7 @@ def main():
             .qty-zero { color: #888; }
             .qty-cell { text-align: right; font-variant-numeric: tabular-nums; }
             .callout { padding: 12px 14px; border-radius: 10px; border: 1px solid #f0b8b8; background: #fff3f3; color: #a12b2b; }
+            .callout-info { margin-bottom: 12px; border-color: #c8dcff; background: #f4f8ff; color: #214f9a; }
             .tag-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; margin-right: 6px; font-size: 12px; }
             .tag-麵 { background: #ffe2e8; color: #b0233e; }
             .tag-湯 { background: #e8f1ff; color: #2b4ba1; }
@@ -508,6 +604,7 @@ def main():
             .tag-pill.tag-湯 { background: #e8f1ff; color: #2b4ba1; }
             .tag-pill.tag-飯 { background: #fff1d6; color: #b46500; }
             .tag-pill.tag-飯糰 { background: #e8ffe8; color: #2b7a3d; }
+            .store-address { margin-top: 4px; font-size: 12px; color: #666; }
             </style>
             """
         )
