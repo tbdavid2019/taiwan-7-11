@@ -19,7 +19,7 @@ The system SHALL attempt the existing OpenPoint live 7-11 inventory flow first. 
 - **THEN** the system falls back to the local normalized 7-11 dataset for the 7-11 portion of the response
 
 ### Requirement: Fallback 7-11 rows SHALL remain compatible with the current results UI
-The system SHALL map fallback 7-11 stores into the same result-row structure used by the current UI so that rendering, favorites, and store grouping continue to function without a separate fallback-specific results surface.
+The system SHALL map fallback 7-11 stores into the same result-row structure used by the current UI so that rendering, favorites, and store grouping continue to function without a separate fallback-specific results surface. Any selector or store-choice UI derived from fallback rows SHALL be limited to the active scoped result set rather than the entire local fallback dataset.
 
 #### Scenario: Fallback rows are rendered in the existing table
 - **WHEN** the 7-11 fallback path is used
@@ -28,6 +28,10 @@ The system SHALL map fallback 7-11 stores into the same result-row structure use
 #### Scenario: Fallback rows preserve stable store identity
 - **WHEN** a user marks a fallback 7-11 store as a favorite
 - **THEN** the favorite key remains stable because the fallback row uses the 7-11 store ID as the store identifier
+
+#### Scenario: Favorites do not expose all fallback stores
+- **WHEN** the 7-11 fallback path is active and the local fallback dataset contains stores outside the active search scope
+- **THEN** the favorites selector shows only fallback stores from the active scoped result set instead of all fallback stores in Taiwan
 
 ### Requirement: The UI SHALL disclose when 7-11 results are using fallback data
 The system SHALL clearly indicate when 7-11 results are using static fallback data rather than live expiring-food inventory data.

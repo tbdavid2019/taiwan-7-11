@@ -161,7 +161,7 @@ def get_family_nearby_stores(lat, lon):
         raise RuntimeError(f"取得全家門市資料失敗: {js}")
     return js["data"]
 
-def apply_filters(
+def filter_results(
     results,
     distance_km,
     store_filter,
@@ -171,10 +171,8 @@ def apply_filters(
     tag_exclude,
     only_favorites,
     favorites,
+    ignore_only_favorites=False,
 ):
-    if not results:
-        return "", _render_error("❌ 尚未搜尋，請先按下「自動定位並搜尋」")
-
     filtered = results
     if distance_km:
         max_distance = float(distance_km) * 1000
@@ -195,7 +193,7 @@ def apply_filters(
         ]
 
     favorites_set = set(favorites or [])
-    if only_favorites:
+    if only_favorites and not ignore_only_favorites:
         filtered = [r for r in filtered if r.get("store_key") in favorites_set]
 
     include_set = set(tag_include or [])
@@ -211,6 +209,34 @@ def apply_filters(
         ]
 
     filtered.sort(key=lambda x: x["distance_m"])
+    return filtered
+
+
+def apply_filters(
+    results,
+    distance_km,
+    store_filter,
+    only_under_1km,
+    only_in_stock,
+    tag_include,
+    tag_exclude,
+    only_favorites,
+    favorites,
+):
+    if not results:
+        return "", _render_error("❌ 尚未搜尋，請先按下「自動定位並搜尋」")
+
+    filtered = filter_results(
+        results,
+        distance_km,
+        store_filter,
+        only_under_1km,
+        only_in_stock,
+        tag_include,
+        tag_exclude,
+        only_favorites,
+        favorites,
+    )
 
     if not filtered:
         return "", _render_error("❌ 沒有符合篩選條件的結果")
@@ -222,6 +248,44 @@ def apply_filters(
     table_html = _render_table(filtered)
 
     return summary_html, table_html
+
+
+def render_results_panel(
+    results,
+    distance_km,
+    store_filter,
+    only_under_1km,
+    only_in_stock,
+    tag_include,
+    tag_exclude,
+    only_favorites,
+    favorites,
+):
+    summary_html, table_html = apply_filters(
+        results,
+        distance_km,
+        store_filter,
+        only_under_1km,
+        only_in_stock,
+        tag_include,
+        tag_exclude,
+        only_favorites,
+        favorites,
+    )
+    favorite_source_rows = filter_results(
+        results,
+        distance_km,
+        store_filter,
+        only_under_1km,
+        only_in_stock,
+        tag_include,
+        tag_exclude,
+        only_favorites,
+        favorites,
+        ignore_only_favorites=True,
+    )
+    favorites_update = build_favorite_choices(favorite_source_rows, favorites)
+    return summary_html, table_html, favorites_update
 
 def build_store_label(store_type, store_name):
     safe_name = html.escape(store_name)
@@ -256,10 +320,13 @@ def build_result_row(
     }
 
 
-def get_7_11_fallback_rows(lat, lon):
+def get_7_11_fallback_rows(lat, lon, max_distance_km=None):
     rows = []
+    max_distance_m = float(max_distance_km) * 1000 if max_distance_km else None
     for store in load_7_11_fallback_stores():
         distance_m = haversine_meters(lat, lon, store["lat"], store["lng"])
+        if max_distance_m is not None and distance_m > max_distance_m:
+            continue
         rows.append(
             build_result_row(
                 "7-11",
@@ -275,8 +342,10 @@ def get_7_11_fallback_rows(lat, lon):
         )
     return rows
 
-def fetch_nearby_stores_data(lat, lon):
+
+def fetch_nearby_stores_data(lat, lon, distance_km=None):
     results = []
+    max_distance_m = float(distance_km) * 1000 if distance_km else None
     # ------------------ 7-11 ------------------
     try:
         token_711 = get_7_11_token()
@@ -321,7 +390,7 @@ def fetch_nearby_stores_data(lat, lon):
                 )
     except Exception as e:
         print(f"❌ 取得 7-11 即期品時發生錯誤: {e}")
-        results.extend(get_7_11_fallback_rows(lat, lon))
+        results.extend(get_7_11_fallback_rows(lat, lon, distance_km))
 
     # ------------------ FamilyMart ------------------
     try:
@@ -377,6 +446,9 @@ def fetch_nearby_stores_data(lat, lon):
     except Exception as e:
         print(f"❌ 取得全家 即期品時發生錯誤: {e}")
 
+    if max_distance_m is not None:
+        results = [r for r in results if r["distance_m"] <= max_distance_m]
+
     return results
 
 def find_nearest_store(
@@ -427,20 +499,20 @@ def find_nearest_store(
                 print(f"地址轉換成功: {address} => lat={lat}, lon={lon}")
             else:
                 print(f"❌ Google Geocoding 失敗: {data}")
-                return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon, [], gr.update()
+                return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon, [], gr.update(), 0
         except Exception as e:
             print(f"❌ Google Geocoding 失敗: {e}")
-            return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon, [], gr.update()
+            return "", _render_error("❌ 地址轉換失敗，請輸入正確地址"), lat, lon, [], gr.update(), 0
 
     if lat == 0 or lon == 0:
-        return "", _render_error("❌ 請輸入地址或提供 GPS 座標"), lat, lon, [], gr.update()
+        return "", _render_error("❌ 請輸入地址或提供 GPS 座標"), lat, lon, [], gr.update(), 0
 
-    results = fetch_nearby_stores_data(lat, lon)
+    results = fetch_nearby_stores_data(lat, lon, distance_km)
 
     if not results:
-        return "", _render_error("❌ 附近沒有可顯示的門市或即期品"), lat, lon, [], gr.update()
+        return "", _render_error("❌ 附近沒有可顯示的門市或即期品"), lat, lon, [], gr.update(), distance_km
 
-    summary_html, table_html = apply_filters(
+    summary_html, table_html, favorites_update = render_results_panel(
         results,
         distance_km,
         store_filter,
@@ -451,9 +523,60 @@ def find_nearest_store(
         only_favorites,
         favorites,
     )
-    favorites_update = build_favorite_choices(results, favorites)
 
-    return summary_html, table_html, lat, lon, results, favorites_update
+    return summary_html, table_html, lat, lon, results, favorites_update, distance_km
+
+
+def handle_distance_change(
+    lat,
+    lon,
+    distance_km,
+    fetched_radius_km,
+    store_filter,
+    only_under_1km,
+    only_in_stock,
+    tag_include,
+    tag_exclude,
+    only_favorites,
+    favorites,
+    results,
+):
+    if not results:
+        return "", _render_error("❌ 尚未搜尋，請先按下「自動定位並搜尋」"), results, gr.update(), fetched_radius_km
+
+    if fetched_radius_km and float(distance_km) <= float(fetched_radius_km):
+        summary_html, table_html, favorites_update = render_results_panel(
+            results,
+            distance_km,
+            store_filter,
+            only_under_1km,
+            only_in_stock,
+            tag_include,
+            tag_exclude,
+            only_favorites,
+            favorites,
+        )
+        return summary_html, table_html, results, favorites_update, fetched_radius_km
+
+    if lat == 0 or lon == 0:
+        return "", _render_error("❌ 缺少目前搜尋座標，請重新搜尋"), results, gr.update(), fetched_radius_km
+
+    fresh_results = fetch_nearby_stores_data(lat, lon, distance_km)
+    if not fresh_results:
+        return "", _render_error("❌ 擴大搜尋範圍後仍沒有可顯示的門市或即期品"), [], gr.update(), distance_km
+
+    summary_html, table_html, favorites_update = render_results_panel(
+        fresh_results,
+        distance_km,
+        store_filter,
+        only_under_1km,
+        only_in_stock,
+        tag_include,
+        tag_exclude,
+        only_favorites,
+        favorites,
+    )
+    return summary_html, table_html, fresh_results, favorites_update, distance_km
 
 def _render_error(msg: str):
     safe_msg = html.escape(msg)
@@ -612,7 +735,8 @@ def main():
         gr.Markdown("""
         1. 按下「📍🔍 自動定位並搜尋」可自動取得目前位置並直接查詢附近即期品
         2. 也可手動輸入地址、緯度、經度與搜尋範圍後再按此按鈕
-        3. 意見反應 https://david888.com 
+        3. 搜尋完成後，多數篩選會直接在目前結果上遮擋；若把搜尋距離加大，系統會自動重抓更大範圍
+        4. 意見反應 https://david888.com 
         """)
 
         with gr.Row():
@@ -684,6 +808,7 @@ def main():
         results_html = gr.HTML("")
         results_state = gr.State([])
         favorites_state = gr.State([])
+        fetched_radius_state = gr.State(0)
 
         def on_mode_change(mode):
             return (
@@ -702,7 +827,7 @@ def main():
             tag_exclude,
             only_favorites,
         ):
-            summary_html, table_html = apply_filters(
+            summary_html, table_html, favorites_update = render_results_panel(
                 results,
                 distance_km,
                 store_filter,
@@ -713,7 +838,61 @@ def main():
                 only_favorites,
                 favorites,
             )
-            return favorites, summary_html, table_html
+            return favorites, summary_html, table_html, favorites_update
+
+        def on_local_filter_change(
+            results,
+            distance_km,
+            store_filter,
+            only_under_1km,
+            only_in_stock,
+            tag_include,
+            tag_exclude,
+            only_favorites,
+            favorites,
+        ):
+            return render_results_panel(
+                results,
+                distance_km,
+                store_filter,
+                only_under_1km,
+                only_in_stock,
+                tag_include,
+                tag_exclude,
+                only_favorites,
+                favorites,
+            )
+
+        def on_distance_change(
+            address,
+            lat,
+            lon,
+            distance_km,
+            fetched_radius_km,
+            store_filter,
+            only_under_1km,
+            only_in_stock,
+            tag_include,
+            tag_exclude,
+            only_favorites,
+            favorites,
+            results,
+            input_mode,
+        ):
+            return handle_distance_change(
+                lat,
+                lon,
+                distance_km,
+                fetched_radius_km,
+                store_filter,
+                only_under_1km,
+                only_in_stock,
+                tag_include,
+                tag_exclude,
+                only_favorites,
+                favorites,
+                results,
+            )
 
         input_mode.change(
             fn=on_mode_change,
@@ -722,7 +901,7 @@ def main():
         )
 
         demo.load(
-            fn=lambda: ("", 0, 0, 3, "全部", False, True, "用 GPS", [], [], False, []),
+            fn=lambda: ("", 0, 0, 3, "全部", False, True, "用 GPS", [], [], False, [], 0),
             outputs=[
                 address,
                 lat,
@@ -736,6 +915,7 @@ def main():
                 tag_exclude,
                 only_favorites,
                 favorites_state,
+                fetched_radius_state,
             ],
             js="""
             () => {
@@ -791,7 +971,7 @@ def main():
                 favorites_state,
                 input_mode,
             ],
-            outputs=[summary_html, results_html, lat, lon, results_state, favorites_group],
+            outputs=[summary_html, results_html, lat, lon, results_state, favorites_group, fetched_radius_state],
             js="""
             (address, lat, lon, distance, storeFilter, under1k, onlyStock, tagInclude, tagExclude, onlyFavorites, favorites, mode) => {
                 const distanceVal = Number(distance) || 0;
@@ -850,18 +1030,38 @@ def main():
             """
         )
 
+        distance_slider.change(
+            fn=on_distance_change,
+            inputs=[
+                address,
+                lat,
+                lon,
+                distance_slider,
+                fetched_radius_state,
+                store_filter,
+                only_under_1km,
+                only_in_stock,
+                tag_include,
+                tag_exclude,
+                only_favorites,
+                favorites_state,
+                results_state,
+                input_mode,
+            ],
+            outputs=[summary_html, results_html, results_state, favorites_group, fetched_radius_state],
+        )
+
         # 篩選器變動時只套用快取結果（不重新查詢）
         for ctrl in (
             store_filter,
             only_under_1km,
             only_in_stock,
-            distance_slider,
             tag_include,
             tag_exclude,
             only_favorites,
         ):
             ctrl.change(
-                fn=apply_filters,
+                fn=on_local_filter_change,
                 inputs=[
                     results_state,
                     distance_slider,
@@ -873,7 +1073,7 @@ def main():
                     only_favorites,
                     favorites_state,
                 ],
-                outputs=[summary_html, results_html],
+                outputs=[summary_html, results_html, favorites_group],
             )
 
         favorites_group.change(
@@ -889,7 +1089,7 @@ def main():
                 tag_exclude,
                 only_favorites,
             ],
-            outputs=[favorites_state, summary_html, results_html],
+            outputs=[favorites_state, summary_html, results_html, favorites_group],
             js="""
             (favorites, results, distance, storeFilter, under1k, onlyStock, tagInclude, tagExclude, onlyFavorites) => {
                 localStorage.setItem('favorites', JSON.stringify(favorites || []));
